@@ -1,0 +1,3 @@
+[submodule "games/pikmin1/pc_port/aurora"]
+	path = games/pikmin1/pc_port/aurora
+	url = https://github.com/jamesdellamorte/aurora.git
