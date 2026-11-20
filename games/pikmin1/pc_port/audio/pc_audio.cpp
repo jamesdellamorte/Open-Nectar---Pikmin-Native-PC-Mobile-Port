@@ -5,7 +5,7 @@
 #include "audio/pc_jam.h"
 #include "audio/pc_wave_bank.h"
 #include "audio/pc_sequence_archive.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <atomic>
 #include <cstdio>
 #include <set>
@@ -22,6 +22,7 @@
 
 static SDL_AudioDeviceID sAudioDevice = 0;
 static SDL_AudioSpec sAudioSpec;
+static SDL_AudioStream* sPlaybackStream = nullptr;
 static AIDCallback sAIDMACallback = nullptr;
 
 static u32 sDMABaseAddr = 0;
@@ -259,47 +260,66 @@ static s16 clamp_s16(int value) {
 }
 
 static bool convert_pcm(const s16* samples, size_t frameCount, int sourceRate,
-                        std::vector<s16>& convertedSamples) {
+                         std::vector<s16>& convertedSamples) {
     if (!sAudioDevice || !samples || !frameCount || sourceRate <= 0) {
         return false;
     }
 
-    SDL_AudioStream* converter = SDL_NewAudioStream(
-        AUDIO_S16SYS, 2, sourceRate, sAudioSpec.format, sAudioSpec.channels, sAudioSpec.freq);
-    if (!converter) {
-        printf("[PC Port Error] SDL_NewAudioStream failed: %s\n", SDL_GetError());
-        return false;
-    }
-
     const size_t byteCount = frameCount * 2 * sizeof(s16);
-    const bool inputFits = byteCount <= static_cast<size_t>(std::numeric_limits<int>::max());
-    bool ok = inputFits && SDL_AudioStreamPut(converter, samples, static_cast<int>(byteCount)) == 0
-           && SDL_AudioStreamFlush(converter) == 0;
-    const int available = ok ? SDL_AudioStreamAvailable(converter) : -1;
-    std::vector<u8> converted(available > 0 ? static_cast<size_t>(available) : 0);
-    if (available > 0) {
-        ok = SDL_AudioStreamGet(converter, converted.data(), available) == available;
-    }
-    SDL_FreeAudioStream(converter);
-    if (!ok || converted.empty()) {
-        printf("[PC Port Error] SDL audio conversion failed: %s\n", SDL_GetError());
+    if (byteCount > static_cast<size_t>(std::numeric_limits<int>::max())) {
         return false;
     }
 
-    convertedSamples.resize(converted.size() / sizeof(s16));
-    std::memcpy(convertedSamples.data(), converted.data(),
-                convertedSamples.size() * sizeof(s16));
-    return true;
+    SDL_AudioSpec srcSpec = {};
+    srcSpec.freq = sourceRate;
+    srcSpec.format = SDL_AUDIO_S16;
+    srcSpec.channels = 2;
+
+    int outLen = 0;
+    Uint8* outData = nullptr;
+    bool ok = SDL_ConvertAudioSamples(&srcSpec, reinterpret_cast<const Uint8*>(samples),
+                                      static_cast<int>(byteCount),
+                                      &sAudioSpec, &outData, &outLen);
+    if (ok && outData) {
+        convertedSamples.resize(static_cast<size_t>(outLen) / 2);
+        std::memcpy(convertedSamples.data(), outData, outLen);
+        SDL_free(outData);
+    }
+    return ok;
 }
 
-static void audio_callback(void*, Uint8* output, int byteCount) {
-    std::memset(output, 0, static_cast<size_t>(byteCount));
-    if (sAudioSpec.format != AUDIO_S16SYS || sAudioSpec.channels != 2) return;
+static void audio_stream_callback(void* userdata, SDL_AudioStream* stream, int additional_amount, int total_amount) {
+    (void)userdata;
+    (void)stream;
+    (void)additional_amount;
+    (void)total_amount;
 
-    s16* dst = reinterpret_cast<s16*>(output);
-    const size_t frameCount = static_cast<size_t>(byteCount) / (2 * sizeof(s16));
+    if (sAudioSpec.format != SDL_AUDIO_S16 || sAudioSpec.channels != 2 || !sPlaybackStream) {
+        return;
+    }
+
+    // Pre-allocate a buffer for the mixed audio data
+    static std::vector<s16> mixedBuffer;
+    if (mixedBuffer.empty()) {
+        mixedBuffer.resize(1024); // Initial capacity, will be resized as needed
+    }
+
+    // The callback is called when SDL needs more audio data
+    // We need to mix audio and push it to the stream
+    // additional_amount tells us how much data is needed
+    // total_amount tells us the total buffer size
+
+    // For simplicity, we'll mix a fixed number of frames
+    // In a real implementation, you'd want to be more precise about frame counts
+    size_t frameCount = 1024; // 512 stereo frames
+    mixedBuffer.resize(frameCount * 2);
+
+    // Zero out the buffer
+    std::memset(mixedBuffer.data(), 0, mixedBuffer.size() * sizeof(s16));
+
     sCallbackCount.fetch_add(1, std::memory_order_relaxed);
     sMixedFrameCount.fetch_add(frameCount, std::memory_order_relaxed);
+
     // The callback owns the audio-device lock, so the active set cannot change
     // underneath it. Compacting it once avoids scanning all 64 slots for every
     // single output sample.
@@ -318,6 +338,7 @@ static void audio_callback(void*, Uint8* output, int byteCount) {
         sDMAUnderruns.fetch_add(1, std::memory_order_relaxed);
     }
     const bool statsOn = pc_audio_stats_enabled();
+    s16* dst = mixedBuffer.data();
     for (size_t frame = 0; frame < frameCount; ++frame) {
         int mixedLeft = 0;
         int mixedRight = 0;
@@ -326,7 +347,7 @@ static void audio_callback(void*, Uint8* output, int byteCount) {
         float dolbySend = 0.0f;
         if (sStreamVoice.active && sStreamVoice.cursor + 1 < sStreamVoice.samples.size()) {
             const float gain = sStreamVolume / 255.0f * sStreamFadeGain
-                             * sBusVolumes[PC_AUDIO_BUS_STREAM];
+                               * sBusVolumes[PC_AUDIO_BUS_STREAM];
             const float streamLeft = sStreamVoice.samples[sStreamVoice.cursor++] * gain;
             const float streamRight = sStreamVoice.samples[sStreamVoice.cursor++] * gain;
             if (statsOn) note_bus_peak(PC_AUDIO_BUS_STREAM, streamLeft);
@@ -481,7 +502,9 @@ static void audio_callback(void*, Uint8* output, int byteCount) {
         dst[frame * 2] = clamp_s16(mixedLeft);
         dst[frame * 2 + 1] = clamp_s16(mixedRight);
     }
-    if (sOutputMuted.load(std::memory_order_relaxed)) std::memset(output, 0, static_cast<size_t>(byteCount));
+    if (sOutputMuted.load(std::memory_order_relaxed)) {
+        std::memset(mixedBuffer.data(), 0, mixedBuffer.size() * sizeof(s16));
+    }
 
     if (sDMAReadCursor >= sDMAQueue.size()) {
         sDMAQueue.clear();
@@ -492,6 +515,12 @@ static void audio_callback(void*, Uint8* output, int byteCount) {
             (sDMAQueue.size() - sDMAReadCursor) * sizeof(s16), UINT32_MAX)),
             std::memory_order_relaxed);
     }
+
+    // Push the mixed data to the stream
+    if (sPlaybackStream && mixedBuffer.size() > 0) {
+        SDL_PutAudioStreamData(sPlaybackStream, mixedBuffer.data(),
+                               static_cast<int>(mixedBuffer.size() * sizeof(s16)));
+    }
 }
 
 bool pc_audio_init(void) {
@@ -501,48 +530,56 @@ bool pc_audio_init(void) {
     sBgmLayerGain.fill(1.0f);
     sBgmLayerTarget.fill(1.0f);
     sBgmLayerStep.fill(0.0f);
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0) {
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         printf("[PC Port Error] SDL_InitSubSystem(AUDIO) failed: %s\n", SDL_GetError());
         return false;
     }
 
-    SDL_AudioSpec desired;
-    SDL_zero(desired);
-    desired.freq = 32000;              // GameCube native AI sample rate
-    desired.format = AUDIO_S16SYS;      // 16-bit signed PCM
-    desired.channels = 2;               // Stereo
-    desired.samples = 1024;             // Buffer size in frames
-    desired.callback = audio_callback;  // Native mixer: stream + JAudio DMA
+    sAudioSpec.freq = 32000;
+    sAudioSpec.format = SDL_AUDIO_S16;
+    sAudioSpec.channels = 2;
 
-    sAudioDevice = SDL_OpenAudioDevice(nullptr, 0, &desired, &sAudioSpec, 0);
-    if (sAudioDevice == 0) {
-        printf("[PC Port Error] SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+    sPlaybackStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+                                                &sAudioSpec, audio_stream_callback, nullptr);
+    if (sPlaybackStream == nullptr) {
+        printf("[PC Port Error] SDL_OpenAudioDeviceStream failed: %s\n", SDL_GetError());
         return false;
     }
 
-    SDL_PauseAudioDevice(sAudioDevice, 0); // Start audio playback
-    printf("[PC Port] SDL2 Audio Subsystem initialized (%d Hz, %u channels)\n",
-           sAudioSpec.freq, static_cast<unsigned>(sAudioSpec.channels));
+    if (!SDL_ResumeAudioStreamDevice(sPlaybackStream)) {
+        printf("[PC Port Error] SDL_ResumeAudioStreamDevice failed: %s\n", SDL_GetError());
+        SDL_CloseAudioDevice(SDL_GetAudioStreamDevice(sPlaybackStream));
+        sAudioDevice = 0;
+        sPlaybackStream = nullptr;
+        return false;
+    }
+    sAudioDevice = SDL_GetAudioStreamDevice(sPlaybackStream);
+    printf("[PC Port] SDL3 Audio Subsystem initialized (%d Hz, %u channels)\n",
+            sAudioSpec.freq, static_cast<unsigned>(sAudioSpec.channels));
     return true;
 }
 
 void pc_audio_shutdown(void) {
 
     if (sAudioDevice != 0) {
-        SDL_LockAudioDevice(sAudioDevice);
-        sStreamVoice = {};
-        sDMAQueue.clear();
-        sDMAReadCursor = 0;
-        for (SampleVoice& voice : sSampleVoices) voice = {};
-        sFxDelayLeft.fill(0.0f);
-        sFxDelayRight.fill(0.0f);
-        sDolbyDelay.fill(0.0f);
-        sFxDelayCursor = 0;
-        sDolbyDelayCursor = 0;
-        sLimiterGain = 1.0f;
-        SDL_UnlockAudioDevice(sAudioDevice);
-        SDL_CloseAudioDevice(sAudioDevice);
+        if (sPlaybackStream) {
+            SDL_PauseAudioStreamDevice(sPlaybackStream);
+            SDL_LockAudioStream(sPlaybackStream);
+            sStreamVoice = {};
+            sDMAQueue.clear();
+            sDMAReadCursor = 0;
+            for (SampleVoice& voice : sSampleVoices) voice = {};
+            sFxDelayLeft.fill(0.0f);
+            sFxDelayRight.fill(0.0f);
+            sDolbyDelay.fill(0.0f);
+            sFxDelayCursor = 0;
+            sDolbyDelayCursor = 0;
+            sLimiterGain = 1.0f;
+            SDL_UnlockAudioStream(sPlaybackStream);
+            SDL_CloseAudioDevice(sAudioDevice);
+        }
         sAudioDevice = 0;
+        sPlaybackStream = nullptr;
     }
     sDecodedWaveCache.clear();
     pc_audio_reset_metrics();
@@ -622,13 +659,13 @@ bool pc_audio_play_stx(const char* path) {
     if (!convert_pcm(pcm.data(), outputFrames, sampleRate, converted)) {
         return false;
     }
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     sStreamVoice.samples = std::move(converted);
     sStreamVoice.cursor = 0;
     sStreamVoice.active = true;
     sStreamFadeGain = 1.0f;
     sStreamFadeStep = 0.0f;
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
     printf("[PC Port] Playing STX stream: %s (%u Hz, %zu frames)\n",
            path, static_cast<unsigned>(sampleRate), outputFrames);
     return true;
@@ -636,13 +673,13 @@ bool pc_audio_play_stx(const char* path) {
 
 void pc_audio_stop_stream(void) {
     if (sAudioDevice) {
-        SDL_LockAudioDevice(sAudioDevice);
+        SDL_LockAudioStream(sPlaybackStream);
         sStreamVoice.active = false;
         sStreamVoice.samples.clear();
         sStreamVoice.cursor = 0;
         sStreamFadeGain = 1.0f;
         sStreamFadeStep = 0.0f;
-        SDL_UnlockAudioDevice(sAudioDevice);
+        SDL_UnlockAudioStream(sPlaybackStream);
     }
 }
 
@@ -655,11 +692,11 @@ void pc_audio_fade_stream(u32 fadeFrames) {
         pc_audio_stop_stream();
         return;
     }
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     if (sStreamVoice.active) {
         const double samples = double(fadeFrames) * double(sAudioSpec.freq) / 60.0;
         sStreamFadeStep = samples > 0.0 ? float(1.0 / samples) : 1.0f;
-        SDL_UnlockAudioDevice(sAudioDevice);
+        SDL_UnlockAudioStream(sPlaybackStream);
         return;
     }
     // Sin stream sonando no hay nada que fundir: conservar la limpieza que
@@ -668,13 +705,13 @@ void pc_audio_fade_stream(u32 fadeFrames) {
     sStreamVoice.cursor = 0;
     sStreamFadeGain = 1.0f;
     sStreamFadeStep = 0.0f;
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 bool pc_audio_load_wave_bank(const char* path) {
-    if (sAudioDevice) SDL_LockAudioDevice(sAudioDevice);
+    if (sAudioDevice) SDL_LockAudioStream(sPlaybackStream);
     for (SampleVoice& voice : sSampleVoices) voice = {};
-    if (sAudioDevice) SDL_UnlockAudioDevice(sAudioDevice);
+    if (sAudioDevice) SDL_UnlockAudioStream(sPlaybackStream);
     sDecodedWaveCache.clear();
     const auto clearHandles = [](auto& voices) {
         for (auto& track : voices)
@@ -754,14 +791,14 @@ void pc_audio_stop_sequence_track(u8 sequenceTrack) {
         }
     }
     if (sAudioDevice) {
-        SDL_LockAudioDevice(sAudioDevice);
+        SDL_LockAudioStream(sPlaybackStream);
         for (SampleVoice& voice : sSampleVoices) {
             if (!voice.active || voice.bgmTrack != sequenceTrack) continue;
             voice.active = false;
             voice.samples.reset();
             voice.cursor = 0.0;
         }
-        SDL_UnlockAudioDevice(sAudioDevice);
+        SDL_UnlockAudioStream(sPlaybackStream);
     }
     if (sequenceTrack == 0) {
         sJamPlayer = {};
@@ -870,7 +907,7 @@ static bool wave_still_playing(int voiceHandle) {
 template <size_t N>
 static void reap_finished_voices(PCJamPlayer& player, int (&voices)[N][8]) {
     if (!sAudioDevice) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     for (size_t track = 0; track < N; ++track) {
         for (u8 voice = 0; voice < 8; ++voice) {
             int& handle = voices[track][voice];
@@ -879,7 +916,7 @@ static void reap_finished_voices(PCJamPlayer& player, int (&voices)[N][8]) {
             player.noteFinished(static_cast<u8>(track), voice);
         }
     }
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 static void tag_bgm_voice(int voiceHandle, u8 sequenceTrack, u8 layer) {
@@ -887,13 +924,13 @@ static void tag_bgm_voice(int voiceHandle, u8 sequenceTrack, u8 layer) {
     const size_t index = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
     if (index >= kSampleVoiceCount) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     SampleVoice& voice = sSampleVoices[index];
     if (voice.active && voice.generation == generation) {
         voice.bgmTrack = sequenceTrack;
         voice.bgmLayer = layer;
     }
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 static void label_voice(int voiceHandle, u8 bank, u8 program, u8 key) {
@@ -915,10 +952,10 @@ static void tag_event_voice(int voiceHandle, u8 eventSource) {
     const size_t index = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
     if (index >= kSampleVoiceCount) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     SampleVoice& voice = sSampleVoices[index];
     if (voice.active && voice.generation == generation) voice.eventSource = eventSource;
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 static void tag_jam_voice(int voiceHandle, u8 owner, u8 source) {
@@ -926,13 +963,13 @@ static void tag_jam_voice(int voiceHandle, u8 owner, u8 source) {
     const size_t index = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
     if (index >= kSampleVoiceCount) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     SampleVoice& voice = sSampleVoices[index];
     if (voice.active && voice.generation == generation) {
         voice.jamOwner = owner;
         voice.jamSource = source;
     }
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 static void advance_bgm_mix(void) {
@@ -1009,7 +1046,7 @@ static int play_wave_info(const PCWaveInfo* info, u64 cacheKey,
     pan = std::clamp(pan, -1.0f, 1.0f);
     trackVolume = std::clamp(trackVolume, 0.0f, 2.0f);
     trackPitch = std::clamp(trackPitch, 0.125f, 8.0f);
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     size_t selected = kSampleVoiceCount;
     for (size_t i = 0; i < kSampleVoiceCount; ++i) {
         if (!sSampleVoices[i].active) {
@@ -1033,7 +1070,7 @@ static int play_wave_info(const PCWaveInfo* info, u64 cacheKey,
         }
         if (selected == kSampleVoiceCount || lowestPriority > priority) {
             sVoiceRejects.fetch_add(1, std::memory_order_relaxed);
-            SDL_UnlockAudioDevice(sAudioDevice);
+            SDL_UnlockAudioStream(sPlaybackStream);
             return -1;
         }
         sVoiceSteals.fetch_add(1, std::memory_order_relaxed);
@@ -1105,7 +1142,7 @@ static int play_wave_info(const PCWaveInfo* info, u64 cacheKey,
     voice.jamSource = 0xFF;
     voice.looping = looping && info->looping;
     voice.active = true;
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
     return static_cast<int>((static_cast<u32>(voice.generation) << 8) | selected);
 }
 
@@ -1363,17 +1400,17 @@ void pc_audio_set_se_track_volume(u8 track, float volume) {
 void pc_audio_set_se_track_paused(u8 track, bool paused) {
     if (track >= sSETrackPaused.size()) return;
     sSEJamPlayer.setChildPaused(track, paused);
-    if (sAudioDevice) SDL_LockAudioDevice(sAudioDevice);
+    if (sAudioDevice) SDL_LockAudioStream(sPlaybackStream);
     sSETrackPaused[track] = paused;
-    if (sAudioDevice) SDL_UnlockAudioDevice(sAudioDevice);
+    if (sAudioDevice) SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 void pc_audio_set_events_paused(bool paused) {
     for (u8 child = 0; child < 16; ++child)
         sEventJamPlayer.setChildPaused(child, paused);
-    if (sAudioDevice) SDL_LockAudioDevice(sAudioDevice);
+    if (sAudioDevice) SDL_LockAudioStream(sPlaybackStream);
     sEventsPaused = paused;
-    if (sAudioDevice) SDL_UnlockAudioDevice(sAudioDevice);
+    if (sAudioDevice) SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 static void (*sEventActionFinishedHook)(u8, u8) = nullptr;
@@ -1410,16 +1447,16 @@ void pc_audio_stop_wave(int voiceHandle) {
     const size_t voiceIndex = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
     if (voiceIndex >= kSampleVoiceCount) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     SampleVoice& voice = sSampleVoices[voiceIndex];
     if (voice.generation != generation) {
-        SDL_UnlockAudioDevice(sAudioDevice);
+        SDL_UnlockAudioStream(sPlaybackStream);
         return;
     }
     voice.active = false;
     voice.samples.reset();
     voice.cursor = 0.0;
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 void pc_audio_update_wave(int voiceHandle, float volume, float pan, float pitch,
@@ -1431,7 +1468,7 @@ void pc_audio_update_wave(int voiceHandle, float volume, float pan, float pitch,
     volume = std::clamp(volume, 0.0f, 2.0f);
     pan = std::clamp(pan, -1.0f, 1.0f);
     pitch = std::clamp(pitch, 0.125f, 8.0f);
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     SampleVoice& voice = sSampleVoices[voiceIndex];
     if (voice.active && voice.generation == generation) {
         voice.trackVolume = volume;
@@ -1448,7 +1485,7 @@ void pc_audio_update_wave(int voiceHandle, float volume, float pan, float pitch,
         voice.left = mixedVolume * (pan <= 0.0f ? 1.0f : 1.0f - pan);
         voice.right = mixedVolume * (pan >= 0.0f ? 1.0f : 1.0f + pan);
     }
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 void pc_audio_release_wave(int voiceHandle, u32 releaseFrames, u16 releaseParam) {
@@ -1456,7 +1493,7 @@ void pc_audio_release_wave(int voiceHandle, u32 releaseFrames, u16 releaseParam)
     const size_t voiceIndex = static_cast<u32>(voiceHandle) & 0xFF;
     const u16 generation = static_cast<u32>(voiceHandle) >> 8;
     if (voiceIndex >= kSampleVoiceCount) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     SampleVoice& voice = sSampleVoices[voiceIndex];
     if (voice.active && voice.generation == generation) {
         if (voice.oscillators && !voice.oscillators->empty()) {
@@ -1477,7 +1514,7 @@ void pc_audio_release_wave(int voiceHandle, u32 releaseFrames, u16 releaseParam)
             voice.releaseStep = voice.releaseGain / static_cast<float>(releaseFrames);
         }
     }
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 // Prints what each path is really contributing, next to the gains that produced
@@ -1497,7 +1534,7 @@ void pc_audio_report_levels(void) {
     if (sAudioDevice) {
         struct Loud { int peak; u8 bank, program, key, bus, event; bool looping; };
         Loud top[3] = {};
-        SDL_LockAudioDevice(sAudioDevice);
+        SDL_LockAudioStream(sPlaybackStream);
         for (SampleVoice& voice : sSampleVoices) {
             if (!voice.active) continue;
             Loud entry { voice.peak, voice.reportBank, voice.reportProgram,
@@ -1507,7 +1544,7 @@ void pc_audio_report_levels(void) {
             for (Loud& slot : top)
                 if (entry.peak > slot.peak) std::swap(entry, slot);
         }
-        SDL_UnlockAudioDevice(sAudioDevice);
+        SDL_UnlockAudioStream(sPlaybackStream);
         for (const Loud& slot : top)
             if (slot.peak > 0)
                 fprintf(stderr, "[PC Audio]   voz fuerte: pico %5d  banco %u programa %u "
@@ -1557,21 +1594,21 @@ bool pc_audio_output_muted(void) { return sOutputMuted.load(std::memory_order_re
 
 void pc_audio_set_bus_volume(PCAudioBus bus, float volume) {
     if (!sAudioDevice || bus < 0 || bus >= PC_AUDIO_BUS_COUNT) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     sBusVolumes[bus] = std::clamp(volume, 0.0f, 2.0f);
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 void pc_audio_stop_bus(PCAudioBus bus) {
     if (!sAudioDevice || bus < 0 || bus >= PC_AUDIO_BUS_COUNT) return;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     for (SampleVoice& voice : sSampleVoices) {
         if (!voice.active || voice.bus != bus) continue;
         voice.active = false;
         voice.samples.reset();
         voice.cursor = 0.0;
     }
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 void pc_audio_set_stereo(bool stereo) {
@@ -1579,19 +1616,19 @@ void pc_audio_set_stereo(bool stereo) {
         sStereoOutput = stereo;
         return;
     }
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     sStereoOutput = stereo;
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
 }
 
 u32 pc_audio_get_active_voice_count(void) {
     if (!sAudioDevice) return 0;
-    SDL_LockAudioDevice(sAudioDevice);
+    SDL_LockAudioStream(sPlaybackStream);
     u32 count = 0;
     for (const SampleVoice& voice : sSampleVoices) {
         if (voice.active) ++count;
     }
-    SDL_UnlockAudioDevice(sAudioDevice);
+    SDL_UnlockAudioStream(sPlaybackStream);
     return count;
 }
 
@@ -1602,7 +1639,7 @@ u32 pc_audio_get_clip_count(void) {
 void pc_audio_get_metrics(PCAudioMetrics* metrics) {
     if (!metrics) return;
     metrics->sampleRate = sAudioSpec.freq > 0 ? static_cast<u32>(sAudioSpec.freq) : 0;
-    metrics->deviceBufferFrames = sAudioSpec.samples;
+    metrics->deviceBufferFrames = 0;
     metrics->callbacks = sCallbackCount.load(std::memory_order_relaxed);
     metrics->mixedFrames = sMixedFrameCount.load(std::memory_order_relaxed);
     metrics->peakActiveVoices = sPeakActiveVoices.load(std::memory_order_relaxed);
@@ -1650,7 +1687,7 @@ void pc_audio_start_dma(u32 start_addr, u32 length) {
 
     if (start_addr != 0 && length > 0) {
         const u8* src = reinterpret_cast<const u8*>(static_cast<uintptr_t>(start_addr));
-        SDL_LockAudioDevice(sAudioDevice);
+        SDL_LockAudioStream(sPlaybackStream);
         // DMA buffers are signed big-endian stereo PCM. Append them so a new
         // hardware block never cuts off a block that SDL has not consumed yet.
         if (sDMAReadCursor != 0) {
@@ -1663,7 +1700,7 @@ void pc_audio_start_dma(u32 start_addr, u32 length) {
         }
         sDMABytesLeft.store(static_cast<u32>((sDMAQueue.size() - sDMAReadCursor) * sizeof(s16)),
                             std::memory_order_relaxed);
-        SDL_UnlockAudioDevice(sAudioDevice);
+        SDL_UnlockAudioStream(sPlaybackStream);
     }
 }
 
@@ -1671,10 +1708,10 @@ void pc_audio_stop_dma(void) {
     sDMAActive.store(false, std::memory_order_relaxed);
     sDMABytesLeft.store(0, std::memory_order_relaxed);
     if (sAudioDevice != 0) {
-        SDL_LockAudioDevice(sAudioDevice);
+        SDL_LockAudioStream(sPlaybackStream);
         sDMAQueue.clear();
         sDMAReadCursor = 0;
-        SDL_UnlockAudioDevice(sAudioDevice);
+        SDL_UnlockAudioStream(sPlaybackStream);
     }
 }
 

@@ -1,14 +1,14 @@
 #ifndef PC_WINDOW_H
 #define PC_WINDOW_H
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include "Dolphin/pad.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-bool pc_window_init(const char* title, int width, int height);
+bool pc_window_init(int argc, char* argv[], const char* title, int width, int height);
 void pc_window_poll_events(PADStatus* pad);
 void pc_window_swap_buffers(void);
 void pc_window_set_swap_interval(int interval);
@@ -104,7 +104,7 @@ SDL_Scancode pc_window_default_key_binding2(int action);
 // binding table as pseudo-scancodes past SDL_NUM_SCANCODES, so
 // PC_BIND_MOUSE_BASE + SDL_BUTTON_X1 is "Mouse 4". Anything that indexes
 // SDL_GetKeyboardState() with a binding must go through pc_window_binding_held.
-#define PC_BIND_MOUSE_BASE  SDL_NUM_SCANCODES
+#define PC_BIND_MOUSE_BASE  SDL_SCANCODE_COUNT
 #define PC_BIND_MOUSE_LAST  (PC_BIND_MOUSE_BASE + 8)
 static inline bool pc_bind_is_mouse(int binding) { return binding >= PC_BIND_MOUSE_BASE && binding <= PC_BIND_MOUSE_LAST; }
 static inline bool pc_bind_is_valid(int binding) { return binding >= 0 && binding <= PC_BIND_MOUSE_LAST; }
@@ -129,7 +129,7 @@ void pc_window_request_bomb_press(int player);
 // Name for either kind of binding ("Mouse 4", "Space", ...).
 const char* pc_window_binding_name(int binding);
 // Whether a binding is currently held, given the keyboard and mouse state.
-bool pc_window_binding_held(int binding, const Uint8* keys, Uint32 mouseButtons);
+bool pc_window_binding_held(int binding, const bool* keys, Uint32 mouseButtons);
 // Mouse buttons pressed since the previous call (SDL_BUTTON mask); for capture.
 Uint32 pc_window_take_mouse_pressed(void);
 const char* pc_window_get_key_action_name(int action);
@@ -154,9 +154,9 @@ int pc_window_get_gamepad_binding(int action);
 void pc_window_set_gamepad_binding_p2(int action, int button);
 int pc_window_get_gamepad_binding_p2(int action);
 const char* pc_window_get_gamepad_button_name(int button);
-int pc_window_gamepad_first_held_binding(SDL_GameController* controller);
-bool pc_window_gamepad_bind_held(SDL_GameController* controller, int bind);
-bool pc_window_gamepad_any_held(SDL_GameController* controller);
+int pc_window_gamepad_first_held_binding(SDL_Gamepad* controller);
+bool pc_window_gamepad_bind_held(SDL_Gamepad* controller, int bind);
+bool pc_window_gamepad_any_held(SDL_Gamepad* controller);
 void pc_window_set_stick_dead_zone(int deadZone);
 int pc_window_get_stick_dead_zone(void);
 void pc_window_set_stick_invert(int flags);
@@ -165,9 +165,9 @@ void pc_window_set_cstick_invert(int flags);
 int pc_window_get_cstick_invert(void);
 
 // Access to controller for menu navigation.
-SDL_GameController* pc_window_get_controller(void);
+SDL_Gamepad* pc_window_get_controller(void);
 // Segundo mando físico (P2 en cooperativo); nullptr si no hay.
-SDL_GameController* pc_window_get_controller_p2(void);
+SDL_Gamepad* pc_window_get_controller_p2(void);
 
 // Asignación de dispositivos por jugador (PLAN_COOP). Sin asignación explícita
 // P1 = teclado + primer mando y P2 = segundo mando.

@@ -20,7 +20,7 @@
 #include "gameflow.h"
 #include "teki.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -481,7 +481,7 @@ void pc_state_hash_tick_end(void)
 		sExitTick      = sTick;
 		SDL_Event ev;
 		std::memset(&ev, 0, sizeof(ev));
-		ev.type = SDL_QUIT;
+		ev.type = SDL_EVENT_QUIT;
 		SDL_PushEvent(&ev);
 	}
 }

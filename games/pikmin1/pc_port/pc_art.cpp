@@ -1,6 +1,6 @@
 #include "pc_art.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -41,13 +41,13 @@ bool readFile(const char* name, std::vector<unsigned char>& bytes)
 		candidates.push_back(std::string("../pc_port/touch/assets/art/") + name + ".png");
 	}
 	for (const std::string& path : candidates) {
-		SDL_RWops* rw = SDL_RWFromFile(path.c_str(), "rb");
+		SDL_IOStream* rw = SDL_IOFromFile(path.c_str(), "rb");
 		if (!rw) continue;
-		const Sint64 size = SDL_RWsize(rw);
-		if (size <= 0) { SDL_RWclose(rw); continue; }
+		const Sint64 size = SDL_GetIOSize(rw);
+		if (size <= 0) { SDL_CloseIO(rw); continue; }
 		bytes.resize((size_t)size);
-		const size_t got = SDL_RWread(rw, bytes.data(), 1, (size_t)size);
-		SDL_RWclose(rw);
+		const size_t got = SDL_ReadIO(rw, bytes.data(), (size_t)size);
+		SDL_CloseIO(rw);
 		if (got == (size_t)size) return true;
 	}
 	// Sin archivo en disco: copia incrustada en el ejecutable (retratos del

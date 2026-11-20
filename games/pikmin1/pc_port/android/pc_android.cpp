@@ -1,7 +1,7 @@
 #ifdef __ANDROID__
 #include "pc_android.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <SDL_syswm.h>
 #include <android/log.h>
 #include <android/native_window.h>

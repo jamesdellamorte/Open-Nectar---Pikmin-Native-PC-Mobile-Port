@@ -12,7 +12,7 @@
 #include "port/jaudio_host.h"
 #include "port/audio_sink.h"
 #include "audio/pc_aram.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstdlib>
 #include <algorithm>
@@ -43,7 +43,7 @@ int pc_jaudio_integration_test()
         std::puts("[jaudio-test] SKIP: extracted assets/dataDir/SndData is required");
         return 77;
     }
-    SDL_setenv("SDL_AUDIODRIVER", std::getenv("PIKMIN_AUDIO_TEST_NO_DEVICE") ? "unavailable-test-driver" : "dummy", 1);
+    SDL_setenv_unsafe("SDL_AUDIODRIVER", std::getenv("PIKMIN_AUDIO_TEST_NO_DEVICE") ? "unavailable-test-driver" : "dummy", 1);
     // Native pointer graphs are larger than the console's packed bank image.
     constexpr u32 heapSize = 0x80000;
     void* heap = std::malloc(heapSize);

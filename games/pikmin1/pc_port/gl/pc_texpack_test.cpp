@@ -3,7 +3,7 @@
 #ifndef SDL_MAIN_HANDLED
 #define SDL_MAIN_HANDLED
 #endif
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #ifdef NDEBUG
 #undef NDEBUG
 #endif

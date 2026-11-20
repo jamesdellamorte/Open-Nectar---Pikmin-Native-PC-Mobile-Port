@@ -22,7 +22,7 @@ s8 pc_pad_axis_from_sdl(int sdlAxisValue) {
 
 bool pc_gamepad_axis_is_mapped_elsewhere(const int* bindings, int bindingCount,
                                          int axis, int nativeAction) {
-    if (!bindings || bindingCount <= 0 || axis < 0 || axis >= SDL_CONTROLLER_AXIS_MAX)
+    if (!bindings || bindingCount <= 0 || axis < 0 || axis >= SDL_GAMEPAD_AXIS_COUNT)
         return false;
 
     for (int action = 0; action < bindingCount; ++action) {

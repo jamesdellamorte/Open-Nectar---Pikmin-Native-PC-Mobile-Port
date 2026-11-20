@@ -5,8 +5,8 @@
  * In Stage 3, VIWaitForRetrace will be replaced with SDL2 vsync/frame limiting.
  */
 #include "Dolphin/vi.h"
+#include "Dolphin/gx.h"
 #include "pc_window.h"
-#include "gl/pc_gfx.h"
 #include "pc_keycaps.h"
 #include <cstdio>
 #include <cstring>
@@ -36,12 +36,10 @@ static VIRetraceCallback sPostRetraceCallback = nullptr;
 extern "C" {
 
 void __VIInit(VITVMode mode)   { (void)mode; }
-void VIInit(void) {
-    printf("[PC Port] VIInit() - Video stub initialized\n");
-}
-void VIFlush(void)             { }
-void VIWaitForRetrace(void)    { 
-    sRetraceCount++; 
+/* VIInit, VIFlush, VIConfigure, VIConfigurePan and VIGetTvFormat are provided
+ * by Aurora's aurora_vi, which models the timing the GX pipeline expects. */
+void pc_vi_present_frame(void* displayBuffer, bool clear) {
+    sRetraceCount++;
     if (sPostRetraceCallback) {
         sPostRetraceCallback(sRetraceCount);
     }
@@ -63,15 +61,22 @@ void VIWaitForRetrace(void)    {
     pc_glass_menu_draw();
     pc_online_menu_draw();
 #endif
-    pc_gfx_present();
     pc_keycaps_draw(); // teclas en lugar de los botones de GameCube (teclado y ratón)
 #if PIKI_PC_TOUCH
     pc_touch_draw();
 #endif
+    if (displayBuffer) {
+        // Aurora presents the XFB at end_frame. Copy this frame after its overlays.
+        GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
+        GXCopyDisp(displayBuffer, clear);
+    }
     pc_window_swap_buffers();
     pc_window_poll_events(nullptr);
 }
-void VIConfigure(const GXRenderModeObj* obj) { (void)obj; }
+
+void VIWaitForRetrace(void) {
+    pc_vi_present_frame(nullptr, false);
+}
 
 VIRetraceCallback VISetPreRetraceCallback(VIRetraceCallback callback) {
     (void)callback; return nullptr;
@@ -89,12 +94,8 @@ void  VISetBlack(BOOL isBlack)       { (void)isBlack; }
 u32   VIGetRetraceCount(void)        { return sRetraceCount; }
 u32   VIGetNextField(void)           { return 0; }
 u32   VIGetCurrentLine(void)         { return 0; }
-u32   VIGetTvFormat(void)            { return 0; } // NTSC
 u32   VIGetDTVStatus(void)           { return 0; }
 
-void  VIConfigurePan(u16 panPosX, u16 panPosY, u16 panSizeX, u16 panSizeY) {
-    (void)panPosX; (void)panPosY; (void)panSizeX; (void)panSizeY;
-}
 void* VIGetNextFrameBuffer()         { return nullptr; }
 void  VISetNextRightFrameBuffer(void* fb) { (void)fb; }
 void  VISet3D()                      { }

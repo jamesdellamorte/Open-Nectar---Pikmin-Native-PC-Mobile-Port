@@ -1,6 +1,6 @@
 #include "GameCoreSection.h"
 #if defined(PIKI_PC_PORT)
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdlib>
 #include <cstdio>
 #include <cmath>
@@ -3175,7 +3175,7 @@ static void pcVsMarkKey()
 	if (!pc_settings_get_debug_keys() || !pc_vs_active() || !naviMgr) {
 		return;
 	}
-	const Uint8* keys = SDL_GetKeyboardState(nullptr);
+	const bool* keys = SDL_GetKeyboardState(nullptr);
 	static bool wasDown = false;
 	const bool isDown   = keys != nullptr && keys[SDL_SCANCODE_F8] != 0;
 	if (isDown && !wasDown) {
@@ -3259,7 +3259,7 @@ static void pcDebugKeys()
 		pcRecordSpawnPikis(100);
 	}
 
-	const Uint8* keys = SDL_GetKeyboardState(nullptr);
+	const bool* keys = SDL_GetKeyboardState(nullptr);
 	static bool wasDown = false;
 	const bool isDown   = keys != nullptr && keys[SDL_SCANCODE_F5] != 0;
 	if (isDown && !wasDown) {

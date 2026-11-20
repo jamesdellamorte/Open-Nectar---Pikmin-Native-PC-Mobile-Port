@@ -12,6 +12,7 @@
  */
 
 #include "settings/pc_settings.h"
+#include "aurora/pc_aurora.h"
 #include "netplay/pc_online_switch.h"
 #include "settings/pc_settings_rows.h"
 #include "settings/pc_glass_menu.h"
@@ -31,7 +32,7 @@
 #include "gl/pc_texpack.h"
 #include "mods/texture_pack_catalog.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -400,20 +401,20 @@ int menuStickThreshold()
 	return threshold < 16384 ? 16384 : threshold;
 }
 
-bool menuStickVertical(SDL_GameController* c, int sign)
+bool menuStickVertical(SDL_Gamepad* c, int sign)
 {
-	const int x = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX);
-	const int y = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTY);
+	const int x = SDL_GetGamepadAxis(c, SDL_GAMEPAD_AXIS_LEFTX);
+	const int y = SDL_GetGamepadAxis(c, SDL_GAMEPAD_AXIS_LEFTY);
 	const int t = menuStickThreshold();
 	if (std::abs(y) <= t || std::abs(y) < std::abs(x))
 		return false;
 	return sign < 0 ? y < 0 : y > 0;
 }
 
-bool menuStickHorizontal(SDL_GameController* c, int sign)
+bool menuStickHorizontal(SDL_Gamepad* c, int sign)
 {
-	const int x = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTX);
-	const int y = SDL_GameControllerGetAxis(c, SDL_CONTROLLER_AXIS_LEFTY);
+	const int x = SDL_GetGamepadAxis(c, SDL_GAMEPAD_AXIS_LEFTX);
+	const int y = SDL_GetGamepadAxis(c, SDL_GAMEPAD_AXIS_LEFTY);
 	const int t = menuStickThreshold();
 	if (std::abs(x) <= t || std::abs(x) < std::abs(y))
 		return false;
@@ -523,8 +524,8 @@ bool sPrevMenuToggleHeldP2 = false;
 int sMenuPlayer = 0;
 int* pendingPadBinds() { return sMenuPlayer == 1 ? sPending.gamepadBindingsP2 : sPending.gamepadBindings; }
 // Mando que maneja el menú: el de J2 si lo abrió él (y sigue conectado).
-SDL_GameController* menuController() {
-    SDL_GameController* p2 = sMenuPlayer == 1 ? pc_window_get_controller_p2() : nullptr;
+SDL_Gamepad* menuController() {
+    SDL_Gamepad* p2 = sMenuPlayer == 1 ? pc_window_get_controller_p2() : nullptr;
     return p2 ? p2 : pc_window_get_controller();
 }
 
@@ -769,15 +770,19 @@ void rebuildResolutionList() {
     const int display = pc_window_get_display_index();
 
     SDL_DisplayMode desktop {};
-    if (SDL_GetDesktopDisplayMode(display, &desktop) == 0) {
-        sDesktopW = desktop.w;
-        sDesktopH = desktop.h;
+    const SDL_DisplayMode* dm = SDL_GetDesktopDisplayMode(display);
+    if (dm != nullptr) {
+        sDesktopW = dm->w;
+        sDesktopH = dm->h;
     }
 
-    const int modeCount = SDL_GetNumDisplayModes(display);
-    for (int i = 0; i < modeCount; i++) {
-        SDL_DisplayMode dm {};
-        if (SDL_GetDisplayMode(display, i, &dm) == 0) addResolution(dm.w, dm.h, false);
+    int modeCount = 0;
+    SDL_DisplayMode** modes = SDL_GetFullscreenDisplayModes(display, &modeCount);
+    if (modes) {
+        for (int i = 0; i < modeCount; i++) {
+            addResolution(modes[i]->w, modes[i]->h, false);
+        }
+        SDL_free(modes);
     }
     if (sDesktopW > 0) addResolution(sDesktopW, sDesktopH, false);
 
@@ -969,8 +974,8 @@ void texturePacksRowAction(int row, const std::vector<std::string>& packs);
 void hdModelsRowAction(int row);
 void hdModelsToggle(int row);
 bool hdModelInstalled(int row);
-void pollKeyCapture(SDL_GameController* ctl);
-bool pollButtonCapture(SDL_GameController* ctl);
+void pollKeyCapture(SDL_Gamepad* ctl);
+bool pollButtonCapture(SDL_Gamepad* ctl);
 void pcCaptainPromptInput();
 
 void confirmVideoSettings() {
@@ -1741,9 +1746,9 @@ void loadConfig() {
             int idx = atoi(key.substr(p2 ? 4 : 3).c_str());
             if (idx >= 0 && idx < PC_KEY_ACT_COUNT) {
                 const int button = atoi(val.c_str());
-                const bool isButton = button >= PC_GP_BIND_NONE && button < SDL_CONTROLLER_BUTTON_MAX;
+                const bool isButton = button >= PC_GP_BIND_NONE && button < SDL_GAMEPAD_BUTTON_COUNT;
                 const int axis = (button - PC_GP_AXIS_BIND) / 2;
-                const bool isAxis = button >= PC_GP_AXIS_BIND && axis >= 0 && axis < SDL_CONTROLLER_AXIS_MAX;
+                const bool isAxis = button >= PC_GP_AXIS_BIND && axis >= 0 && axis < SDL_GAMEPAD_AXIS_COUNT;
                 if (isButton || isAxis) {
                     (p2 ? sConfig.gamepadBindingsP2 : sConfig.gamepadBindings)[idx] = button;
                 }
@@ -1772,78 +1777,78 @@ bool padEdge(bool pressed, int slot) { return pc_menu_edge(pressed, slot, SDL_Ge
 /// Stick threshold for menus. Follows the configured dead zone, which a fixed
 /// 8000 used to ignore -- so changing the setting appeared to do nothing.
 int menuStickThreshold();
-bool menuStickVertical(SDL_GameController* c, int sign);
-bool menuStickHorizontal(SDL_GameController* c, int sign);
+bool menuStickVertical(SDL_Gamepad* c, int sign);
+bool menuStickHorizontal(SDL_Gamepad* c, int sign);
 
-bool padNavUp(SDL_GameController* c)
+bool padNavUp(SDL_Gamepad* c)
 {
-	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_UP)
+	return padEdge((c && (SDL_GetGamepadButton(c, SDL_GAMEPAD_BUTTON_DPAD_UP)
 	                       || menuStickVertical(c, -1))) || (sTouchFrameButtons & PAD_BUTTON_UP), 0);
 }
-bool padNavDown(SDL_GameController* c)
+bool padNavDown(SDL_Gamepad* c)
 {
-	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_DOWN)
+	return padEdge((c && (SDL_GetGamepadButton(c, SDL_GAMEPAD_BUTTON_DPAD_DOWN)
 	                   || menuStickVertical(c, 1))) || (sTouchFrameButtons & PAD_BUTTON_DOWN), 1);
 }
-bool padNavLeft(SDL_GameController* c)
+bool padNavLeft(SDL_Gamepad* c)
 {
-	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_LEFT)
+	return padEdge((c && (SDL_GetGamepadButton(c, SDL_GAMEPAD_BUTTON_DPAD_LEFT)
 	                   || menuStickHorizontal(c, -1))) || (sTouchFrameButtons & PAD_BUTTON_LEFT), 2);
 }
-bool padNavRight(SDL_GameController* c)
+bool padNavRight(SDL_Gamepad* c)
 {
-	return padEdge((c && (SDL_GameControllerGetButton(c, SDL_CONTROLLER_BUTTON_DPAD_RIGHT)
+	return padEdge((c && (SDL_GetGamepadButton(c, SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
 	                   || menuStickHorizontal(c, 1))) || (sTouchFrameButtons & PAD_BUTTON_RIGHT), 3);
 }
 // A y B del menú siguen los bindings del mando, como el juego: con A y B
 // intercambiados el menú aceptaba con uno y el juego con el otro. Una acción
 // sin botón asignado vuelve al físico para que el menú nunca quede inservible.
-bool menuPadHeld(SDL_GameController* c, int action, SDL_GameControllerButton physical)
+bool menuPadHeld(SDL_Gamepad* c, int action, SDL_GamepadButton physical)
 {
 	if (!c)
 		return false;
 	const int bind = pc_window_get_gamepad_binding(action);
 	if (bind < 0)
-		return SDL_GameControllerGetButton(c, physical) != 0;
+		return SDL_GetGamepadButton(c, physical) != 0;
 	return pc_window_gamepad_bind_held(c, bind);
 }
-bool padNavA(SDL_GameController* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
-bool padNavB(SDL_GameController* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_B, SDL_CONTROLLER_BUTTON_B) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
+bool padNavA(SDL_Gamepad* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_A, SDL_GAMEPAD_BUTTON_SOUTH) || (sTouchFrameButtons & PAD_BUTTON_A), 4); }
+bool padNavB(SDL_Gamepad* c) { return padEdge(menuPadHeld(c, PC_KEY_ACT_B, SDL_GAMEPAD_BUTTON_EAST) || (sTouchFrameButtons & PAD_BUTTON_B), 5); }
 
 // The new-game prompt is a game-facing dialog rather than the F1 settings
 // menu. Its accept/cancel actions follow the configured A/B bindings, which
 // may be either SDL buttons or the axis encodings used by the remapping page.
-bool promptPadBinding(SDL_GameController* c, int action, int edgeSlot)
+bool promptPadBinding(SDL_Gamepad* c, int action, int edgeSlot)
 {
 	return c && padEdge(pc_window_gamepad_bind_held(c, pc_window_get_gamepad_binding(action)), edgeSlot);
 }
 
-bool promptPadA(SDL_GameController* c)
+bool promptPadA(SDL_Gamepad* c)
 {
 	return promptPadBinding(c, PC_KEY_ACT_A, 4);
 }
 
-bool promptPadB(SDL_GameController* c)
+bool promptPadB(SDL_Gamepad* c)
 {
 	return promptPadBinding(c, PC_KEY_ACT_B, 5);
 }
 
-bool captureConfirmHeld(SDL_GameController* ctl)
+bool captureConfirmHeld(SDL_Gamepad* ctl)
 {
 	int numKeys = 0;
-	const Uint8* keys = SDL_GetKeyboardState(&numKeys);
+	const bool* keys = SDL_GetKeyboardState(&numKeys);
 	if (SDL_SCANCODE_RETURN < numKeys && keys[SDL_SCANCODE_RETURN])
 		return true;
 	if (SDL_SCANCODE_SPACE < numKeys && keys[SDL_SCANCODE_SPACE])
 		return true;
-	return menuPadHeld(ctl, PC_KEY_ACT_A, SDL_CONTROLLER_BUTTON_A);
+	return menuPadHeld(ctl, PC_KEY_ACT_A, SDL_GAMEPAD_BUTTON_SOUTH);
 }
 
 } // namespace
 
 bool keyWentDown(SDL_Scancode sc) {
     int numKeys = 0;
-    const Uint8* state = SDL_GetKeyboardState(&numKeys);
+    const bool* state = SDL_GetKeyboardState(&numKeys);
     bool now = (int)sc < numKeys && state[sc] != 0;
     bool prev = (int)sc < (int)gPrevKeys.size() && gPrevKeys[sc] != 0;
     return now && !prev;
@@ -1853,12 +1858,12 @@ bool keyWentDown(SDL_Scancode sc) {
 static Uint32 sMenuMouseEdge = 0;
 
 static bool menuBindingWentDown(int bind) {
-    if (bind <= 0 || bind >= SDL_NUM_SCANCODES) return false;
+    if (bind <= 0 || bind >= SDL_SCANCODE_COUNT) return false;
     return keyWentDown(static_cast<SDL_Scancode>(bind));
 }
 
 bool menuAcceptClick() {
-    return (sMenuMouseEdge & SDL_BUTTON(SDL_BUTTON_LEFT)) != 0;
+    return (sMenuMouseEdge & SDL_BUTTON_MASK(SDL_BUTTON_LEFT)) != 0;
 }
 
 // Accept: Enter, numpad Enter, Space, left click, and a non-mouse A binding.
@@ -1880,14 +1885,14 @@ static bool menuCancelBinding(int bind) {
 }
 bool menuCancelKey() {
     return keyWentDown(SDL_SCANCODE_ESCAPE) || keyWentDown(SDL_SCANCODE_BACKSPACE)
-        || (sMenuMouseEdge & SDL_BUTTON(SDL_BUTTON_RIGHT)) != 0
+        || (sMenuMouseEdge & SDL_BUTTON_MASK(SDL_BUTTON_RIGHT)) != 0
         || menuCancelBinding(pc_window_get_key_binding(PC_KEY_ACT_B))
         || menuCancelBinding(pc_window_get_key_binding2(PC_KEY_ACT_B));
 }
 
 void latchKeys() {
     int numKeys = 0;
-    const Uint8* state = SDL_GetKeyboardState(&numKeys);
+    const bool* state = SDL_GetKeyboardState(&numKeys);
     if (numKeys < 0) numKeys = 0;
     gPrevKeys.assign(state, state + numKeys);
 }
@@ -2084,16 +2089,16 @@ void pollMenuInput() {
     sTouchButtons = 0;
     // Coop: el Select del mando de J2 también abre el menú, y entonces lo
     // maneja su mando y edita sus bindings.
-    SDL_GameController* ctl1 = pc_window_get_controller();
-    SDL_GameController* ctl2 = pc_window_get_controller_p2();
+    SDL_Gamepad* ctl1 = pc_window_get_controller();
+    SDL_Gamepad* ctl2 = pc_window_get_controller_p2();
     if (ctl2 == ctl1) ctl2 = nullptr;
-    SDL_GameController* ctl = sMenuOpen ? menuController() : ctl1;
+    SDL_Gamepad* ctl = sMenuOpen ? menuController() : ctl1;
     const bool toggleRequested = sToggleRequested;
     sToggleRequested = false;
-    const bool menuToggleHeld = ctl1 && SDL_GameControllerGetButton(
-        ctl1, SDL_CONTROLLER_BUTTON_BACK) != 0;
-    const bool menuToggleHeldP2 = ctl2 && SDL_GameControllerGetButton(
-        ctl2, SDL_CONTROLLER_BUTTON_BACK) != 0;
+    const bool menuToggleHeld = ctl1 && SDL_GetGamepadButton(
+        ctl1, SDL_GAMEPAD_BUTTON_BACK) != 0;
+    const bool menuToggleHeldP2 = ctl2 && SDL_GetGamepadButton(
+        ctl2, SDL_GAMEPAD_BUTTON_BACK) != 0;
     const bool togglePressedP1 = menuToggleHeld && !sPrevMenuToggleHeld;
     const bool togglePressedP2 = menuToggleHeldP2 && !sPrevMenuToggleHeldP2;
     sPrevMenuToggleHeldP2 = menuToggleHeldP2;
@@ -2193,7 +2198,7 @@ void pollMenuInput() {
         bool close = menuOkKey() || menuCancelKey()
                   || (sTouchFrameButtons & (PAD_BUTTON_A | PAD_BUTTON_B)) != 0;
         sTouchTapPending = false;
-        if (SDL_GameController* ctl = pc_window_get_controller()) close |= promptPadA(ctl) || promptPadB(ctl);
+        if (SDL_Gamepad* ctl = pc_window_get_controller()) close |= promptPadA(ctl) || promptPadB(ctl);
         if (close) {
             SeSystem::playSysSe(SYSSE_DECIDE1);
             pc_mission_close_textbox();
@@ -2611,9 +2616,9 @@ void pollMenuInput() {
         if (padNavRight(ctl)) right = true;
         if (padNavA(ctl)) ok = true;
         if (padNavB(ctl)) cancel = true;
-        if (padEdge((ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_LEFTSHOULDER))
+        if (padEdge((ctl && SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER))
                     || (sTouchFrameButtons & PAD_TRIGGER_L), 10)) tabPrev = true;
-        if (padEdge((ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER))
+        if (padEdge((ctl && SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
                     || (sTouchFrameButtons & PAD_TRIGGER_R), 11)) tabNext = true;
     }
 
@@ -2741,7 +2746,7 @@ void pollMenuInput() {
 }
 
 // Captura de tecla/botón de ratón para la fila seleccionada (Controls).
-void pollKeyCapture(SDL_GameController* ctl) {
+void pollKeyCapture(SDL_Gamepad* ctl) {
     if (keyWentDown(SDL_SCANCODE_ESCAPE) || padNavB(ctl)) {
         sWaitingForKey = false;
         sCaptureWaitRelease = false;
@@ -2755,7 +2760,7 @@ void pollKeyCapture(SDL_GameController* ctl) {
     // Issue #68: Shift, Ctrl y Alt también se pueden asignar, y Supr o
     // Retroceso dejan la tecla vacía (acción desactivada en esa ranura).
     int* slot = sCaptureSecond ? sPending.keyboardBindings2 : sPending.keyboardBindings;
-    for (int sc = 0; sc < SDL_NUM_SCANCODES; sc++) {
+    for (int sc = 0; sc < SDL_SCANCODE_COUNT; sc++) {
         if (!keyWentDown(static_cast<SDL_Scancode>(sc)))
             continue;
         if (sc == SDL_SCANCODE_DELETE || sc == SDL_SCANCODE_BACKSPACE)
@@ -2772,7 +2777,7 @@ void pollKeyCapture(SDL_GameController* ctl) {
         const Uint32 mouseWent = sMenuMouseEdge & ~sCapturePrevMouse;
         sCapturePrevMouse = SDL_GetMouseState(NULL, NULL);
         for (int b = SDL_BUTTON_LEFT; b <= PC_BIND_MOUSE_LAST - PC_BIND_MOUSE_BASE; b++) {
-            if (!(mouseWent & SDL_BUTTON(b))) continue;
+            if (!(mouseWent & SDL_BUTTON_MASK(b))) continue;
             slot[sControlSelection] = PC_BIND_MOUSE_BASE + b;
             sWaitingForKey = false;
             break;
@@ -2782,7 +2787,7 @@ void pollKeyCapture(SDL_GameController* ctl) {
 
 // Captura de botón de mando (Gamepad); true mientras la captura o la
 // espera de soltar consumen la entrada.
-bool pollButtonCapture(SDL_GameController* ctl) {
+bool pollButtonCapture(SDL_Gamepad* ctl) {
     if (sWaitingForButton) {
         // B/Circle is a bindable face button. Only Esc cancels capture.
         if (keyWentDown(SDL_SCANCODE_ESCAPE)) {
@@ -4312,7 +4317,7 @@ void srSetResetPad(int bind) {
 // Retroceso dejan la acción sin tecla o botón.
 bool srPollCapture() {
     if (!sSrCapture && !sSrCaptureWait) return false;
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (sSrCaptureWait) {
         if (!captureConfirmHeld(ctl) && !pc_window_gamepad_any_held(ctl)) sSrCaptureWait = false;
         return true;
@@ -4328,7 +4333,7 @@ bool srPollCapture() {
             srSetResetKey(SDL_SCANCODE_UNKNOWN);
             done = true;
         }
-        for (int sc = 1; sc < SDL_NUM_SCANCODES && !done; sc++) {
+        for (int sc = 1; sc < SDL_SCANCODE_COUNT && !done; sc++) {
             if (!keyWentDown(static_cast<SDL_Scancode>(sc))) continue;
             srSetResetKey(sc);
             done = true;
@@ -4372,7 +4377,7 @@ void pcSpeedrunIntroInput() {
             accept = true;
         }
     }
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (promptPadA(ctl)) accept = true;
         if (promptPadB(ctl)) back = true;
@@ -4677,8 +4682,8 @@ void rndCopyShareCode() {
 void rndTextInputOn() {
     // En Android abre el teclado virtual; en escritorio solo activa los
     // eventos de texto. Se deja como estaba al salir.
-    sRndTextWasOn = SDL_IsTextInputActive() == SDL_TRUE;
-    if (!sRndTextWasOn) SDL_StartTextInput();
+    sRndTextWasOn = SDL_TextInputActive(pc_aurora_get_window()) == true;
+    if (!sRndTextWasOn) SDL_StartTextInput(pc_aurora_get_window());
 }
 
 void rndShareBegin() {
@@ -4690,7 +4695,7 @@ void rndShareBegin() {
 
 void rndShareEnd() {
     sShareEditing = false;
-    if (!sRndTextWasOn) SDL_StopTextInput();
+    if (!sRndTextWasOn) SDL_StopTextInput(pc_aurora_get_window());
 }
 
 void rndShareType(char c) {
@@ -4840,7 +4845,7 @@ void pcRandomizerIntroInput() {
         bool ok     = keyWentDown(SDL_SCANCODE_RETURN) || keyWentDown(SDL_SCANCODE_KP_ENTER)
                    || keyWentDown(SDL_SCANCODE_SPACE) || menuAcceptClick();
         bool cancel = keyWentDown(SDL_SCANCODE_ESCAPE);
-        SDL_GameController* ctl = pc_window_get_controller();
+        SDL_Gamepad* ctl = pc_window_get_controller();
         if (sTouchTapPending) {
             sTouchTapPending = false;
             ok = true;
@@ -4851,7 +4856,7 @@ void pcRandomizerIntroInput() {
         }
         if ((sTouchFrameButtons & PAD_BUTTON_A) != 0) ok = true;
         if ((sTouchFrameButtons & PAD_BUTTON_B) != 0) cancel = true;
-        if ((SDL_GetModState() & KMOD_CTRL) && keyWentDown(SDL_SCANCODE_V)) {
+        if ((SDL_GetModState() & SDL_KMOD_CTRL) && keyWentDown(SDL_SCANCODE_V)) {
             char* clip = SDL_GetClipboardText();
             sShareLen  = 0;
             sShareEdit[0] = '\0';
@@ -4897,7 +4902,7 @@ void pcRandomizerIntroInput() {
             }
         }
     }
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (promptPadA(ctl)) accept = true;
         if (promptPadB(ctl)) back = true;
@@ -4927,10 +4932,10 @@ void pcRandomizerIntroInput() {
     // Ctrl+C copia el código compartido (semilla + ajustes); Ctrl+V pega un
     // código compartido (aplica ambos) o, si no lo es, una semilla.
     const bool seedRows = sRndRow == RND_Share;
-    if (seedRows && (SDL_GetModState() & KMOD_CTRL) && keyWentDown(SDL_SCANCODE_C)) {
+    if (seedRows && (SDL_GetModState() & SDL_KMOD_CTRL) && keyWentDown(SDL_SCANCODE_C)) {
         rndCopyShareCode();
     }
-    if (seedRows && (SDL_GetModState() & KMOD_CTRL) && keyWentDown(SDL_SCANCODE_V)) {
+    if (seedRows && (SDL_GetModState() & SDL_KMOD_CTRL) && keyWentDown(SDL_SCANCODE_V)) {
         char* clip = SDL_GetClipboardText();
         if (clip && *clip && !rndApplyShareCode(clip)) sShareErrorUntil = SDL_GetTicks() + 3000;
         SDL_free(clip);
@@ -5072,8 +5077,8 @@ void pc_randomizer_pause_update(void) {
     // Ctrl+C copia el código. Flanco propio: la pausa no pasa por el
     // latch de teclas de los prompts.
     static bool sWasDown = false;
-    const Uint8* keys    = SDL_GetKeyboardState(nullptr);
-    const bool down      = keys && keys[SDL_SCANCODE_C] && (SDL_GetModState() & KMOD_CTRL);
+    const bool* keys    = SDL_GetKeyboardState(nullptr);
+    const bool down      = keys && keys[SDL_SCANCODE_C] && (SDL_GetModState() & SDL_KMOD_CTRL);
     if (down && !sWasDown) {
         char code[PC_RANDOMIZER_SHARE_CODE_LEN];
         pc_randomizer_format_share_code(pc_randomizer_rules().seed, pc_randomizer_rules().flags, code, sizeof(code));
@@ -5138,7 +5143,7 @@ void pcErasedNoticeInput() {
         sTouchTapPending = false;
         accept = true; // un toque en cualquier sitio cierra el aviso
     }
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl && promptPadA(ctl)) accept = true;
     if (accept) sErasedNoticeOpen = false;
 }
@@ -5320,7 +5325,7 @@ void pcNewGamePromptInput() {
         }
     }
 
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (padNavLeft(ctl))  left   = true;
         if (padNavRight(ctl)) right  = true;
@@ -5539,7 +5544,7 @@ void pcPlayerCountPromptInput() {
         }
     }
 
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (padNavLeft(ctl))  left   = true;
         if (padNavRight(ctl)) right  = true;
@@ -5877,7 +5882,7 @@ int captainPickPointer(int* captain, bool ignore) {
 
 // Selector de capitán (Olimar, Louie o un Pikmin) compartido por el prompt de mandos del
 // coop y el de 1 jugador. Devuelve 0 nada, 1 aceptado, 2 atrás.
-int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* captain, bool ignoreWindow) {
+int captainPickInput(int player, bool keyboardOk, SDL_Gamepad* ctl, int* captain, bool ignoreWindow) {
     bool left = false, right = false, up = false, down = false, accept = false, back = false;
     bool pagePrev = false, pageNext = false; // páginas de los personajes propios
     if (keyboardOk) {
@@ -5924,20 +5929,20 @@ int captainPickInput(int player, bool keyboardOk, SDL_GameController* ctl, int* 
         }
     }
     if (ctl) {
-        const bool hLeft  = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
-        const bool hRight = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
+        const bool hLeft  = SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
+        const bool hRight = SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
         const bool hA     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_A));
         const bool hB     = pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
         if (padEdge(hLeft, 2))  left   = true;
         if (padEdge(hRight, 3)) right  = true;
-        const bool hUp   = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_UP) || menuStickVertical(ctl, -1);
-        const bool hDown = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_DOWN) || menuStickVertical(ctl, 1);
+        const bool hUp   = SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_DPAD_UP) || menuStickVertical(ctl, -1);
+        const bool hDown = SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_DPAD_DOWN) || menuStickVertical(ctl, 1);
         if (padEdge(hUp, 0))   up   = true;
         if (padEdge(hDown, 1)) down = true;
         if (padEdge(hA, 4))     accept = true;
         if (padEdge(hB, 5))     back   = true;
-        if (padEdge(SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_LEFTSHOULDER) != 0, 12)) pagePrev = true;
-        if (padEdge(SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) != 0, 13)) pageNext = true;
+        if (padEdge(SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) != 0, 12)) pagePrev = true;
+        if (padEdge(SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) != 0, 13)) pageNext = true;
     }
     // The mouse belongs to whoever has the keyboard. A click inside the opening window is
     // taken and dropped with the rest of the input.
@@ -6216,7 +6221,7 @@ void pcDevAssignPromptInput() {
         // si es el suyo, o para P1 siempre; táctil para P1).
         const int player = devAssignPlayer();
         const bool keyboardOk = player == 0 || sDevAssignKind[player] == PC_INPUT_DEV_KEYBOARD;
-        SDL_GameController* ctl = player == 0 ? pc_window_get_controller() : pc_window_get_controller_p2();
+        SDL_Gamepad* ctl = player == 0 ? pc_window_get_controller() : pc_window_get_controller_p2();
         const bool padOk = ctl && sDevAssignKind[player] == PC_INPUT_DEV_GAMEPAD;
         pc_window_discard_button_presses();
         if (cancel) {
@@ -6252,13 +6257,13 @@ void pcDevAssignPromptInput() {
     // combinar primero el estado de los dos mandos y detectar el flanco una
     // sola vez, o el mando que no pulsa "suelta" el slot cada frame y el otro
     // dispara un flanco nuevo en cada tick.
-    SDL_GameController* pads[2] = { pc_window_get_controller(), pc_window_get_controller_p2() };
+    SDL_Gamepad* pads[2] = { pc_window_get_controller(), pc_window_get_controller_p2() };
     bool hLeft = false, hRight = false, hA = false, hB = false;
     for (int i = 0; i < 2; i++) {
-        SDL_GameController* ctl = pads[i];
+        SDL_Gamepad* ctl = pads[i];
         if (!ctl) continue;
-        hLeft  |= SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
-        hRight |= SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
+        hLeft  |= SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || menuStickHorizontal(ctl, -1);
+        hRight |= SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || menuStickHorizontal(ctl, 1);
         hA     |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_A));
         hB     |= pc_window_gamepad_bind_held(ctl, pc_window_get_gamepad_binding(PC_KEY_ACT_B));
     }
@@ -6642,7 +6647,7 @@ void pcVsRulesInput()
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
     sTouchTapPending = false;
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (padNavUp(ctl)) up = true;
         if (padNavDown(ctl)) down = true;
@@ -6693,7 +6698,7 @@ void pcVsEndScreenInput()
     right |= (sTouchFrameButtons & (PAD_BUTTON_RIGHT | PAD_BUTTON_DOWN)) != 0;
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     sTouchTapPending = false;
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (padNavLeft(ctl) || padNavUp(ctl)) left = true;
         if (padNavRight(ctl) || padNavDown(ctl)) right = true;
@@ -7186,7 +7191,7 @@ void pcMissionPromptInput()
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
     sTouchTapPending = false;
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (padNavUp(ctl)) up = true;
         if (padNavDown(ctl)) down = true;
@@ -7194,8 +7199,8 @@ void pcMissionPromptInput()
         if (padNavRight(ctl)) right = true;
         if (promptPadA(ctl)) accept = true;
         if (promptPadB(ctl)) cancel = true;
-        const bool x = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_X) != 0;
-        const bool y = SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_Y) != 0;
+        const bool x = SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_WEST) != 0;
+        const bool y = SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_NORTH) != 0;
         copy |= x && !sPrevX;
         erase |= y && !sPrevY;
         sPrevX = x;
@@ -7779,7 +7784,7 @@ void pcCampaignMapInput()
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     cancel |= (sTouchFrameButtons & PAD_BUTTON_B) != 0;
     sTouchTapPending = false;
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (padNavUp(ctl)) up = true;
         if (padNavDown(ctl)) down = true;
@@ -8291,7 +8296,7 @@ void pcMissionEndInput()
     right |= (sTouchFrameButtons & (PAD_BUTTON_RIGHT | PAD_BUTTON_DOWN)) != 0;
     accept |= (sTouchFrameButtons & PAD_BUTTON_A) != 0;
     sTouchTapPending = false;
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl) {
         if (padNavLeft(ctl) || padNavUp(ctl)) left = true;
         if (padNavRight(ctl) || padNavDown(ctl)) right = true;
@@ -10530,7 +10535,7 @@ void pc_settings_row_change(int group, int row, int dir, bool ok) {
 bool pc_settings_capture_active(void) { return sWaitingForKey || sWaitingForButton || sCaptureWaitRelease; }
 
 void pc_settings_capture_poll(void) {
-    SDL_GameController* ctl = menuController();
+    SDL_Gamepad* ctl = menuController();
     if (sWaitingForKey) { pollKeyCapture(ctl); return; }
     if (sWaitingForButton || sCaptureWaitRelease) pollButtonCapture(ctl);
 }
@@ -10605,7 +10610,7 @@ PcNavEdges pc_settings_read_nav_edges(void) {
     // Teclado con repetición al mantener (mismo retardo/cadencia que el
     // mando): en listas largas como la de resoluciones se baja solo.
     int numKeys = 0;
-    const Uint8* keys = SDL_GetKeyboardState(&numKeys);
+    const bool* keys = SDL_GetKeyboardState(&numKeys);
     auto held = [&](SDL_Scancode a, SDL_Scancode b) { return (a < numKeys && keys[a]) || (b < numKeys && keys[b]); };
     e.up     = padEdge(held(SDL_SCANCODE_UP, SDL_SCANCODE_W), 6);
     e.down   = padEdge(held(SDL_SCANCODE_DOWN, SDL_SCANCODE_S), 7);
@@ -10615,11 +10620,11 @@ PcNavEdges pc_settings_read_nav_edges(void) {
     e.cancel = menuCancelKey();
     e.tabPrev = keyWentDown(SDL_SCANCODE_Q) || keyWentDown(SDL_SCANCODE_PAGEUP);
     e.tabNext = keyWentDown(SDL_SCANCODE_E) || keyWentDown(SDL_SCANCODE_PAGEDOWN) || keyWentDown(SDL_SCANCODE_TAB);
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     if (ctl || sTouchFrameButtons) {
-        if (padEdge((ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_LEFTSHOULDER))
+        if (padEdge((ctl && SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER))
                     || (sTouchFrameButtons & PAD_TRIGGER_L), 10)) e.tabPrev = true;
-        if (padEdge((ctl && SDL_GameControllerGetButton(ctl, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER))
+        if (padEdge((ctl && SDL_GetGamepadButton(ctl, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER))
                     || (sTouchFrameButtons & PAD_TRIGGER_R), 11)) e.tabNext = true;
         if (padNavUp(ctl)) e.up = true;
         if (padNavDown(ctl)) e.down = true;

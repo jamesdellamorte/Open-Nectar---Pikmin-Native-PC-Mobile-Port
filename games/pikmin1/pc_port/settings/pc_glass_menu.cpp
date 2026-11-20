@@ -1,6 +1,6 @@
 #include "settings/pc_glass_menu.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstring>
 

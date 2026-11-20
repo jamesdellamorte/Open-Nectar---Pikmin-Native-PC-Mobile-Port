@@ -16,7 +16,7 @@
 #include "FlowController.h"
 #include "gameflow.h"
 #include "PlayerState.h"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -95,17 +95,17 @@ struct PadLabels {
     const char* start;
 };
 
-PadLabels padLabels(SDL_GameController* ctl)
+PadLabels padLabels(SDL_Gamepad* ctl)
 {
-    switch (SDL_GameControllerGetType(ctl)) {
-    case SDL_CONTROLLER_TYPE_PS3:
-    case SDL_CONTROLLER_TYPE_PS4:
-    case SDL_CONTROLLER_TYPE_PS5:
+    switch (SDL_GetGamepadType(ctl)) {
+    case SDL_GAMEPAD_TYPE_PS3:
+    case SDL_GAMEPAD_TYPE_PS4:
+    case SDL_GAMEPAD_TYPE_PS5:
         return { { "x", "o", "[]", "^" }, "L1", "R1", "L2", "R2", "SH", "OP" };
-    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
-    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
-    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
-    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+    case SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
         return { { "B", "A", "Y", "X" }, "L", "R", "ZL", "ZR", "-", "+" };
     default:
         return { { "A", "B", "X", "Y" }, "LB", "RB", "LT", "RT", "<<", ">>" };
@@ -119,46 +119,46 @@ void drawStick(float cx, float cy, float ax, float ay, bool click)
     fillCircle(cx + ax * 8.0f, cy + ay * 8.0f, 6.0f, moved ? kDown : Colour(225, 235, 250, 160));
 }
 
-void drawPad(float x, float y, SDL_GameController* ctl)
+void drawPad(float x, float y, SDL_Gamepad* ctl)
 {
-    auto btn  = [&](SDL_GameControllerButton b) { return SDL_GameControllerGetButton(ctl, b) != 0; };
-    auto axis = [&](SDL_GameControllerAxis a) { return SDL_GameControllerGetAxis(ctl, a) / 32767.0f; };
+    auto btn  = [&](SDL_GamepadButton b) { return SDL_GetGamepadButton(ctl, b) != 0; };
+    auto axis = [&](SDL_GamepadAxis a) { return SDL_GetGamepadAxis(ctl, a) / 32767.0f; };
     const PadLabels lab = padLabels(ctl);
 
     // Gatillos (se llenan según lo apretados) y botones de hombro.
-    const float lt = std::clamp(axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT), 0.0f, 1.0f);
-    const float rt = std::clamp(axis(SDL_CONTROLLER_AXIS_TRIGGERRIGHT), 0.0f, 1.0f);
+    const float lt = std::clamp(axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER), 0.0f, 1.0f);
+    const float rt = std::clamp(axis(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER), 0.0f, 1.0f);
     fillRound(x + 14, y, 46, 9, 4, kIdle);
     if (lt > 0.02f) fillRound(x + 14, y, 46 * lt, 9, 4, kDown);
     fillRound(x + 140, y, 46, 9, 4, kIdle);
     if (rt > 0.02f) fillRound(x + 186 - 46 * rt, y, 46 * rt, 9, 4, kDown);
     textCentered(x + 37, y + 4.5f, lab.l2, kLabel, 5, 8);
     textCentered(x + 163, y + 4.5f, lab.r2, kLabel, 5, 8);
-    fillRound(x + 14, y + 11, 46, 9, 4, btn(SDL_CONTROLLER_BUTTON_LEFTSHOULDER) ? kDown : kIdle);
-    fillRound(x + 140, y + 11, 46, 9, 4, btn(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER) ? kDown : kIdle);
+    fillRound(x + 14, y + 11, 46, 9, 4, btn(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) ? kDown : kIdle);
+    fillRound(x + 140, y + 11, 46, 9, 4, btn(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) ? kDown : kIdle);
     textCentered(x + 37, y + 15.5f, lab.l1, kLabel, 5, 8);
     textCentered(x + 163, y + 15.5f, lab.r1, kLabel, 5, 8);
 
     // Cuerpo del mando.
     fillRound(x, y + 22, 200, 82, 30, kPanel);
 
-    drawStick(x + 44, y + 52, axis(SDL_CONTROLLER_AXIS_LEFTX), axis(SDL_CONTROLLER_AXIS_LEFTY),
-              btn(SDL_CONTROLLER_BUTTON_LEFTSTICK));
-    drawStick(x + 130, y + 88, axis(SDL_CONTROLLER_AXIS_RIGHTX), axis(SDL_CONTROLLER_AXIS_RIGHTY),
-              btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK));
+    drawStick(x + 44, y + 52, axis(SDL_GAMEPAD_AXIS_LEFTX), axis(SDL_GAMEPAD_AXIS_LEFTY),
+              btn(SDL_GAMEPAD_BUTTON_LEFT_STICK));
+    drawStick(x + 130, y + 88, axis(SDL_GAMEPAD_AXIS_RIGHTX), axis(SDL_GAMEPAD_AXIS_RIGHTY),
+              btn(SDL_GAMEPAD_BUTTON_RIGHT_STICK));
 
     // Cruceta.
     const float dx = x + 70, dy = y + 88;
     fillRect(dx - 4, dy - 4, 8, 8, kIdle);
-    fillRect(dx - 4, dy - 13, 8, 9, btn(SDL_CONTROLLER_BUTTON_DPAD_UP) ? kDown : kIdle);
-    fillRect(dx - 4, dy + 4, 8, 9, btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN) ? kDown : kIdle);
-    fillRect(dx - 13, dy - 4, 9, 8, btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT) ? kDown : kIdle);
-    fillRect(dx + 4, dy - 4, 9, 8, btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT) ? kDown : kIdle);
+    fillRect(dx - 4, dy - 13, 8, 9, btn(SDL_GAMEPAD_BUTTON_DPAD_UP) ? kDown : kIdle);
+    fillRect(dx - 4, dy + 4, 8, 9, btn(SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? kDown : kIdle);
+    fillRect(dx - 13, dy - 4, 9, 8, btn(SDL_GAMEPAD_BUTTON_DPAD_LEFT) ? kDown : kIdle);
+    fillRect(dx + 4, dy - 4, 9, 8, btn(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ? kDown : kIdle);
 
     // Botones frontales en rombo (SDL los nombra por posición: A abajo...).
     const float fx = x + 156, fy = y + 52;
-    const SDL_GameControllerButton face[4] = { SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B,
-                                               SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y };
+    const SDL_GamepadButton face[4] = { SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST,
+                                               SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_NORTH };
     const float off[4][2] = { { 0, 13 }, { 13, 0 }, { -13, 0 }, { 0, -13 } };
     for (int i = 0; i < 4; ++i) {
         fillCircle(fx + off[i][0], fy + off[i][1], 7.0f, btn(face[i]) ? kDown : kIdle);
@@ -166,8 +166,8 @@ void drawPad(float x, float y, SDL_GameController* ctl)
     }
 
     // Select/View y Start/Menu.
-    fillRound(x + 84, y + 47, 13, 8, 4, btn(SDL_CONTROLLER_BUTTON_BACK) ? kDown : kIdle);
-    fillRound(x + 103, y + 47, 13, 8, 4, btn(SDL_CONTROLLER_BUTTON_START) ? kDown : kIdle);
+    fillRound(x + 84, y + 47, 13, 8, 4, btn(SDL_GAMEPAD_BUTTON_EAST) ? kDown : kIdle);
+    fillRound(x + 103, y + 47, 13, 8, 4, btn(SDL_GAMEPAD_BUTTON_START) ? kDown : kIdle);
     textCentered(x + 90.5f, y + 51, lab.back, kLabel, 4, 6);
     textCentered(x + 109.5f, y + 51, lab.start, kLabel, 4, 6);
 }
@@ -279,7 +279,7 @@ const Key kNum5[] = { { SDL_SCANCODE_KP_0, 2, "0" }, { SDL_SCANCODE_KP_PERIOD, 1
 constexpr float kU = 9.0f;   // tamaño de una tecla (espacio de 480)
 constexpr float kGapK = 1.0f; // separación entre teclas
 
-void drawKey(float x, float y, float w, float h, const Key& k, const Uint8* keys)
+void drawKey(float x, float y, float w, float h, const Key& k, const bool* keys)
 {
     if (k.sc == GAP) return;
     const bool down = keys[k.sc] != 0;
@@ -289,7 +289,7 @@ void drawKey(float x, float y, float w, float h, const Key& k, const Uint8* keys
     if (!label) {
         // Letras, números y signos: lo que pone la tecla en la distribución
         // del jugador (Ñ incluida si la fuente la tiene).
-        const char* name = SDL_GetKeyName(SDL_GetKeyFromScancode(k.sc));
+        const char* name = SDL_GetKeyName(SDL_GetKeyFromScancode(k.sc, 0, false));
         std::snprintf(buf, sizeof(buf), "%s", name);
         label = buf;
     }
@@ -297,7 +297,7 @@ void drawKey(float x, float y, float w, float h, const Key& k, const Uint8* keys
 }
 
 template <size_t N>
-float drawRow(float x, float y, const Key (&row)[N], const Uint8* keys)
+float drawRow(float x, float y, const Key (&row)[N], const bool* keys)
 {
     for (const Key& k : row) {
         const float w = k.w * kU + (k.w - 1.0f) * kGapK;
@@ -309,7 +309,7 @@ float drawRow(float x, float y, const Key (&row)[N], const Uint8* keys)
 
 void drawKeyboard(float x, float y)
 {
-    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    const bool* keys = SDL_GetKeyboardState(nullptr);
     const float step = kU + kGapK;
     const float mainW = 15.0f * kU + 14.0f * kGapK;
     const float navX = x + mainW + 6.0f, numX = navX + 3.0f * step + 6.0f;
@@ -642,11 +642,11 @@ bool sRestartPending = false;
 bool resetHeld()
 {
     int numKeys = 0;
-    const Uint8* keys = SDL_GetKeyboardState(&numKeys);
+    const bool* keys = SDL_GetKeyboardState(&numKeys);
     for (const SDL_Scancode k : { pc_window_get_key_binding(PC_KEY_ACT_SPEEDRUN_RESET),
                                   pc_window_get_key_binding2(PC_KEY_ACT_SPEEDRUN_RESET) })
         if (k > SDL_SCANCODE_UNKNOWN && int(k) < numKeys && keys[k]) return true;
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
     const int bind = pc_window_get_gamepad_binding(PC_KEY_ACT_SPEEDRUN_RESET);
     return ctl && bind >= 0 && pc_window_gamepad_bind_held(ctl, bind);
 }
@@ -902,7 +902,7 @@ void pollDebug()
     const SDL_Scancode keys[6] = { SDL_SCANCODE_F6, SDL_SCANCODE_F7, SDL_SCANCODE_F8,
                                    SDL_SCANCODE_F9, SDL_SCANCODE_F10, SDL_SCANCODE_F11 };
     int numKeys = 0;
-    const Uint8* state = SDL_GetKeyboardState(&numKeys);
+    const bool* state = SDL_GetKeyboardState(&numKeys);
     for (int i = 0; i < 6; i++) {
         const bool now = int(keys[i]) < numKeys && state[keys[i]];
         const bool went = now && !prev[i];
@@ -1209,7 +1209,7 @@ void pc_speedrun_draw(void)
     }
 
     // Visor de controles: el mando si es lo último que se ha usado.
-    SDL_GameController* ctl = pc_window_get_controller();
+    SDL_Gamepad* ctl = pc_window_get_controller();
 #if PIKI_PC_TOUCH
     // Móvil: la capa táctil en vez del teclado y ratón.
     if (pc_touch_visible()) {

@@ -1,6 +1,6 @@
 #include "pc_record.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 
 #include "pc_photo_mode.h"
@@ -20,10 +20,10 @@ int pc_record_ctrl_pressed(int digit)
 {
 	if (digit < 1 || digit > 9) return 0;
 	int numKeys       = 0;
-	const Uint8* keys = SDL_GetKeyboardState(&numKeys);
+	const bool* keys = SDL_GetKeyboardState(&numKeys);
 	// SDL_SCANCODE_1..9 son consecutivos.
 	const int sc      = SDL_SCANCODE_1 + (digit - 1);
-	const bool ctrl   = (SDL_GetModState() & KMOD_CTRL) != 0;
+	const bool ctrl   = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
 	const bool down   = ctrl && keys != nullptr && sc < numKeys && keys[sc] != 0;
 	const bool edge   = down && !sCtrlPrev[digit];
 	sCtrlPrev[digit]  = down;

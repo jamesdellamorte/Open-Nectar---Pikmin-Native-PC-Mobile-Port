@@ -2,7 +2,7 @@
 
 #if defined(PIKI_XINPUT_USB)
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <libusb.h>
 
 #include <atomic>
@@ -20,7 +20,7 @@ uint8_t               sOutEp  = 0; // endpoint de salida (vibración); 0 si no t
 SDL_Joystick*         sJoy    = nullptr;
 SDL_JoystickID        sJoyId  = -1;
 std::atomic<bool>     sRun { false };
-Uint32                sNextScan = 0;
+Uint64                sNextScan = 0;
 SDL_Thread*           sThread = nullptr; // SDL_CreateThread: sin operator new (P2 lo redirige al heap del juego)
 
 // Interfaz Xbox 360 (clase 0xFF, subclase 0x5D, protocolo 0x01) y su
@@ -66,9 +66,9 @@ bool findInterface(libusb_device* dev, const libusb_device_descriptor& dd, int& 
 // Vibración: paquete Xbox 360 {0x00, 0x08, 0x00, motor grande, motor pequeño,
 // 0, 0, 0} al endpoint de salida. SDL llama aquí desde SDL_GameControllerRumble
 // y la apaga solo al cumplirse la duración.
-int rumble(void*, Uint16 low, Uint16 high)
+bool rumble(void*, Uint16 low, Uint16 high)
 {
-    if (!sHandle || !sOutEp) return -1;
+    if (!sHandle || !sOutEp) return false;
     unsigned char packet[8] = { 0x00, 0x08, 0x00, static_cast<unsigned char>(low >> 8), static_cast<unsigned char>(high >> 8), 0, 0, 0 };
     int sent = 0;
     const int r = libusb_interrupt_transfer(sHandle, sOutEp, packet, sizeof packet, &sent, 30);
@@ -89,28 +89,28 @@ int16_t trigger(uint8_t v) { return static_cast<int16_t>(v * 257 - 32768); }
 void apply(const unsigned char* b)
 {
     const unsigned lo = b[2], hi = b[3];
-    SDL_JoystickSetVirtualButton(sJoy, 0, (hi & 0x10) != 0);  // A
-    SDL_JoystickSetVirtualButton(sJoy, 1, (hi & 0x20) != 0);  // B
-    SDL_JoystickSetVirtualButton(sJoy, 2, (hi & 0x40) != 0);  // X
-    SDL_JoystickSetVirtualButton(sJoy, 3, (hi & 0x80) != 0);  // Y
-    SDL_JoystickSetVirtualButton(sJoy, 4, (lo & 0x20) != 0);  // Back
-    SDL_JoystickSetVirtualButton(sJoy, 5, (hi & 0x04) != 0);  // Guide
-    SDL_JoystickSetVirtualButton(sJoy, 6, (lo & 0x10) != 0);  // Start
-    SDL_JoystickSetVirtualButton(sJoy, 7, (lo & 0x40) != 0);  // L3
-    SDL_JoystickSetVirtualButton(sJoy, 8, (lo & 0x80) != 0);  // R3
-    SDL_JoystickSetVirtualButton(sJoy, 9, (hi & 0x01) != 0);  // LB
-    SDL_JoystickSetVirtualButton(sJoy, 10, (hi & 0x02) != 0); // RB
-    SDL_JoystickSetVirtualButton(sJoy, 11, (lo & 0x01) != 0); // D-pad arriba
-    SDL_JoystickSetVirtualButton(sJoy, 12, (lo & 0x02) != 0); // abajo
-    SDL_JoystickSetVirtualButton(sJoy, 13, (lo & 0x04) != 0); // izquierda
-    SDL_JoystickSetVirtualButton(sJoy, 14, (lo & 0x08) != 0); // derecha
+    SDL_SetJoystickVirtualButton(sJoy, 0, (hi & 0x10) != 0);  // A
+    SDL_SetJoystickVirtualButton(sJoy, 1, (hi & 0x20) != 0);  // B
+    SDL_SetJoystickVirtualButton(sJoy, 2, (hi & 0x40) != 0);  // X
+    SDL_SetJoystickVirtualButton(sJoy, 3, (hi & 0x80) != 0);  // Y
+    SDL_SetJoystickVirtualButton(sJoy, 4, (lo & 0x20) != 0);  // Back
+    SDL_SetJoystickVirtualButton(sJoy, 5, (hi & 0x04) != 0);  // Guide
+    SDL_SetJoystickVirtualButton(sJoy, 6, (lo & 0x10) != 0);  // Start
+    SDL_SetJoystickVirtualButton(sJoy, 7, (lo & 0x40) != 0);  // L3
+    SDL_SetJoystickVirtualButton(sJoy, 8, (lo & 0x80) != 0);  // R3
+    SDL_SetJoystickVirtualButton(sJoy, 9, (hi & 0x01) != 0);  // LB
+    SDL_SetJoystickVirtualButton(sJoy, 10, (hi & 0x02) != 0); // RB
+    SDL_SetJoystickVirtualButton(sJoy, 11, (lo & 0x01) != 0); // D-pad arriba
+    SDL_SetJoystickVirtualButton(sJoy, 12, (lo & 0x02) != 0); // abajo
+    SDL_SetJoystickVirtualButton(sJoy, 13, (lo & 0x04) != 0); // izquierda
+    SDL_SetJoystickVirtualButton(sJoy, 14, (lo & 0x08) != 0); // derecha
     auto s16 = [&](int at) { return static_cast<int16_t>(b[at] | (b[at + 1] << 8)); };
-    SDL_JoystickSetVirtualAxis(sJoy, 0, s16(6));
-    SDL_JoystickSetVirtualAxis(sJoy, 1, flipY(s16(8)));
-    SDL_JoystickSetVirtualAxis(sJoy, 2, s16(10));
-    SDL_JoystickSetVirtualAxis(sJoy, 3, flipY(s16(12)));
-    SDL_JoystickSetVirtualAxis(sJoy, 4, trigger(b[4]));
-    SDL_JoystickSetVirtualAxis(sJoy, 5, trigger(b[5]));
+    SDL_SetJoystickVirtualAxis(sJoy, 0, s16(6));
+    SDL_SetJoystickVirtualAxis(sJoy, 1, flipY(s16(8)));
+    SDL_SetJoystickVirtualAxis(sJoy, 2, s16(10));
+    SDL_SetJoystickVirtualAxis(sJoy, 3, flipY(s16(12)));
+    SDL_SetJoystickVirtualAxis(sJoy, 4, trigger(b[4]));
+    SDL_SetJoystickVirtualAxis(sJoy, 5, trigger(b[5]));
 }
 
 int readLoop(void*)
@@ -143,13 +143,18 @@ void closeDevice()
     // Serializa la retirada con los callbacks de vibración de SDL.
     SDL_LockJoysticks();
     if (sHandle && sOutEp) rumble(nullptr, 0, 0);
-    for (int i = 0; i < SDL_NumJoysticks(); i++) {
-        if (SDL_JoystickGetDeviceInstanceID(i) == sJoyId) {
-            SDL_JoystickDetachVirtual(i);
-            break;
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetJoysticks(&count);
+    if (ids) {
+        for (int i = 0; i < count; i++) {
+            if (ids[i] == sJoyId) {
+                SDL_DetachVirtualJoystick(ids[i]);
+                break;
+            }
         }
+        SDL_free(ids);
     }
-    if (sJoy) SDL_JoystickClose(sJoy);
+    if (sJoy) SDL_CloseJoystick(sJoy);
     sJoy = nullptr;
     sJoyId = -1;
     if (sHandle) {
@@ -225,15 +230,15 @@ static void scanDevices()
 
     SDL_VirtualJoystickDesc desc;
     SDL_zero(desc);
-    desc.version    = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
-    desc.type       = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type       = SDL_JOYSTICK_TYPE_GAMEPAD;
     desc.naxes      = 6;
     desc.nbuttons   = 15;
     desc.vendor_id  = chosen.idVendor;
     desc.product_id = chosen.idProduct;
     desc.name       = "USB XInput Controller";
     desc.Rumble     = rumble;
-    const int index = SDL_JoystickAttachVirtualEx(&desc);
+    const int index = SDL_AttachVirtualJoystick(&desc);
     if (index < 0) {
         printf("[PC Port] Could not create the virtual controller: %s\n", SDL_GetError());
         fflush(stdout);
@@ -241,16 +246,16 @@ static void scanDevices()
         return;
     }
     char guid[40] = {};
-    SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(index), guid, sizeof guid);
+    SDL_GUIDToString(SDL_GetJoystickGUIDForID(index), guid, sizeof guid);
     char mapping[512];
     snprintf(mapping, sizeof mapping,
              "%s,USB XInput Controller,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,"
              "leftshoulder:b9,rightshoulder:b10,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,"
              "leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,platform:Mac OS X",
              guid);
-    SDL_GameControllerAddMapping(mapping);
-    sJoyId = SDL_JoystickGetDeviceInstanceID(index);
-    sJoy   = SDL_JoystickOpen(index);
+    SDL_AddGamepadMapping(mapping);
+    sJoyId = index;
+    sJoy   = SDL_OpenJoystick(index);
     if (!sJoy) {
         closeDevice();
         return;
@@ -286,8 +291,8 @@ void pc_xinput_usb_update(void)
 {
     if (!sCtx) return;
     if (sHandle && !sRun) closeDevice();
-    const Uint32 now = SDL_GetTicks();
-    if (!sHandle && SDL_TICKS_PASSED(now, sNextScan)) {
+    const Uint64 now = SDL_GetTicks();
+    if (!sHandle && now >= sNextScan) {
         sNextScan = now + 1000;
         scanDevices();
     }

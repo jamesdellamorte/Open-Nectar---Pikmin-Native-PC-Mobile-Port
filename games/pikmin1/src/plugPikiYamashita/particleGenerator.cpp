@@ -1139,8 +1139,8 @@ void zen::particleGenerator::drawPtclOriented(Graphics& gfx)
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_S16, 0);
 	GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_U8, 0);
 
-	GXSetArray(GX_VA_POS, lpsPos, 6);
-	GXSetArray(GX_VA_TEX0, lpsCoord, 2);
+	GX_SET_HOST_ARRAY(GX_VA_POS, lpsPos, sizeof(lpsPos) / 6, 6);
+	GX_SET_HOST_ARRAY(GX_VA_TEX0, lpsCoord, sizeof(lpsCoord) / 2, 2);
 
 	GXSetNumChans(0);
 	GXSetNumTexGens(1);

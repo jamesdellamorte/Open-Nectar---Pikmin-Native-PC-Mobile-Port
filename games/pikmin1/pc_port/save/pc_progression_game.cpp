@@ -3,7 +3,7 @@
 #include "pc_progression_backup.h"
 #include "pc_progression_saved.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <string>
 #include <vector>

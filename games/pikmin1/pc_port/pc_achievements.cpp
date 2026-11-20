@@ -1,6 +1,6 @@
 #include "pc_achievements.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstring>
 #include <deque>

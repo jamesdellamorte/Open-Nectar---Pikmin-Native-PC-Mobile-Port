@@ -1,5 +1,5 @@
 // Real SDL virtual controllers; only the physical USB transport is simulated.
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <libusb.h>
 #include <atomic>
 #include <cstdio>
@@ -138,13 +138,13 @@ int main()
     attached = 2;
     waitFor([] { return SDL_NumJoysticks() == baseJoysticks + 1; });
     CHECK(opened == 1); // Existing single-controller policy, even with two devices.
-    SDL_GameController* pad = SDL_GameControllerOpen(SDL_NumJoysticks() - 1);
+    SDL_Gamepad* pad = SDL_GameControllerOpen(SDL_NumJoysticks() - 1);
     CHECK(pad);
-    waitFor([&] { return SDL_GameControllerGetButton(pad, SDL_CONTROLLER_BUTTON_A) != 0; });
-    CHECK(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTX) == 0x1234);
-    CHECK(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_LEFTY) == 32767);
-    CHECK(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) == 32767);
-    CHECK(SDL_GameControllerGetAxis(pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) == 0);
+    waitFor([&] { return SDL_GameControllerGetButton(pad, SDL_GAMEPAD_BUTTON_A) != 0; });
+    CHECK(SDL_GameControllerGetAxis(pad, SDL_GAMEPAD_AXIS_LEFTX) == 0x1234);
+    CHECK(SDL_GameControllerGetAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) == 32767);
+    CHECK(SDL_GameControllerGetAxis(pad, SDL_GAMEPAD_AXIS_TRIGGERLEFT) == 32767);
+    CHECK(SDL_GameControllerGetAxis(pad, SDL_GAMEPAD_AXIS_TRIGGERRIGHT) == 0);
     CHECK(SDL_GameControllerRumble(pad, 0xab00, 0xcd00, 10000) == 0);
     CHECK(rumbleLow == 0xab && rumbleHigh == 0xcd);
     attached = 0;

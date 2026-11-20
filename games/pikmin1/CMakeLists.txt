@@ -151,6 +151,10 @@ option(PIKMIN_GLES "Build with OpenGL ES 3.0 renderer" ${PIKMIN_GLES_DEFAULT})
 # pueden activar para probarlos con ratón (SDL_HINT_MOUSE_TOUCH_EVENTS=1).
 option(PIKMIN_TOUCH "Build the touch control layer" ${PIKMIN_GLES_DEFAULT})
 
+# ─── Aurora (GX → WebGPU/Dawn → Metal) ───
+# Aurora is the only graphics backend. The game compiles against Aurora's
+# <dolphin/gx.h> headers directly; pc_port/gl and gx_stubs.cpp are removed.
+
 # ─── Qué partes del árbol se construyen ───
 # El launcher es un programa de escritorio (diálogos nativos, dolphin-tool): en
 # Android no se compila; se rehace como interfaz Android en la fase 7 del plan
@@ -213,10 +217,10 @@ add_compile_definitions(
     DTK_CONFIG_NONMATCHING=1
     PIKI_USE_GLES=$<BOOL:${PIKMIN_GLES}>
     PIKI_PC_TOUCH=$<BOOL:${PIKMIN_TOUCH}>
-    # The Linux renderer translates the game's native GX command stream to
-    # OpenGL.  Selecting the old Win32/OpenGL code path here mixes two
-    # incompatible texture/rendering backends and leaves GXTexObj uninitialised.
-    PIKI_USE_DGX=1
+    # Aurora translates the game's native GX command stream to WebGPU (Dawn)
+    # which uses Metal on Apple platforms.
+    PIKI_USE_AURORA=1
+    TARGET_PC=1
     # Selects which engine drives audio. 0 keeps the native PC mixer in
     # pc_port/audio; 1 compiles the original engine in src/jaudio and renders
     # its DSPchannel_ voice parameter blocks through pc_dsp_host. The two
@@ -242,9 +246,6 @@ endif()
 # ─── Include paths ───
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin/OS
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/Dolphin/GX
     ${PC_PORT_DIR}
     ${PC_PORT_DIR}/gl
 )
@@ -255,29 +256,23 @@ include_directories(
 #  implementations (those are replaced by our stubs).
 ###############################################################################
 
-# ─── External Dependencies (SDL2 & OpenGL) ───
-# En Android SDL2 se compila en el mismo árbol: el proyecto Gradle
-# (android/app/jni/CMakeLists.txt) añade las fuentes de SDL2 antes que este
-# fichero y deja el target `SDL2` definido, con sus cabeceras como interfaz.
+# ─── External Dependencies (SDL3 + SDL2-compat) ───
+# Aurora owns the window and the event loop via SDL3. The game's pc_port code
+# is still written against the SDL2 API; on desktop we satisfy it with
+# sdl2-compat, a shim that implements the SDL2 ABI on top of the same SDL3
+# runtime Aurora uses, so the process runs exactly one SDL.
 if (ANDROID)
     if (NOT TARGET SDL2)
         message(FATAL_ERROR "Android: SDL2 must be added as a target before this project (see android/app/jni/CMakeLists.txt)")
     endif()
     set(SDL2_LIBRARIES SDL2)
-    # El port incluye <SDL2/SDL.h> (la disposición de los paquetes de
-    # escritorio); el árbol de fuentes de SDL2 tiene SDL.h suelto. Un enlace
-    # simbólico en el directorio de build reproduce esa disposición, y sirve
-    # también a pikmin_legacy, que ve las cabeceras sin enlazar SDL2.
     get_target_property(_sdl2_src SDL2 SOURCE_DIR)
     file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/sdl2-include")
     file(CREATE_LINK "${_sdl2_src}/include" "${CMAKE_CURRENT_BINARY_DIR}/sdl2-include/SDL2" SYMBOLIC)
     set(SDL2_INCLUDE_DIRS "${CMAKE_CURRENT_BINARY_DIR}/sdl2-include" "${_sdl2_src}/include")
 else()
-    find_package(SDL2 QUIET)
-    if (NOT SDL2_FOUND)
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(SDL2 REQUIRED sdl2)
-    endif()
+    find_package(SDL3 CONFIG REQUIRED)
+    set(SDL3_INCLUDE_DIRS "${SDL3_INCLUDE_DIRS}")
 endif()
 
 # Paquetes de release: SDL2 y el runtime de C/C++ dentro de cada ejecutable,
@@ -313,8 +308,9 @@ endif()
 
 # OpenGL de escritorio no existe en Android: allí el contexto es GLES/EGL y lo
 # aporta el NDK (fase 3 del plan de Android).
+# With Aurora, OpenGL is not used by the game at all.
 if (NOT WIN32 AND NOT ANDROID)
-    find_package(OpenGL REQUIRED)
+    find_package(OpenGL QUIET)
 endif()
 
 # Versión y commit en el informe de crash (pikmin_crash.log), como en Pikmin 2.
@@ -405,10 +401,7 @@ set(PC_PORT_SOURCES
     pc_port/pc_throw_arc.cpp
     pc_port/pc_achievements.cpp
     pc_port/pc_file_dialog.cpp
-    pc_port/gl/pc_gfx.cpp
-    pc_port/gl/pc_tev_shader.cpp
-    pc_port/gl/pc_postprocess.cpp
-    pc_port/gl/pc_texpack.cpp
+    pc_port/aurora/pc_aurora.cpp
     pc_port/timing/pc_frame_scheduler.cpp
     pc_port/timing/pc_render_phase.cpp
     pc_port/timing/pc_visual_snapshot.cpp
@@ -452,6 +445,7 @@ set(PC_PORT_SOURCES
     pc_port/dolphin_stubs/pc_host_readable.cpp
     pc_port/dolphin_stubs/pc_host_readable_os.cpp
     pc_port/dolphin_stubs/gx_stubs.cpp
+    pc_port/dolphin_stubs/stb_impl.cpp
     pc_port/dolphin_stubs/dvd_stubs.cpp
     pc_port/dolphin_stubs/pad_stubs.cpp
     pc_port/dolphin_stubs/vi_stubs.cpp
@@ -473,7 +467,7 @@ if (PIKMIN_TOUCH)
 endif()
 
 include_directories(
-    ${SDL2_INCLUDE_DIRS}
+    ${SDL3_INCLUDE_DIRS}
     ${OPENGL_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/bcdec
@@ -962,29 +956,14 @@ if(PIKMIN_ENABLE_IPO)
     endif()
 endif()
 
-# Link against math, SDL2, and OpenGL libraries
+# Link against math and SDL3
 if (WIN32)
-    # MinGW ya trae las funciones matemáticas en su runtime: no existe libm
-    # suelta, y OpenGL lo expone opengl32.
-    #
-    # SDL2main NO se enlaza: aporta un WinMain que llama a SDL_main, y este
-    # proyecto declara SDL_MAIN_HANDLED y define su propio main. Enlazarlo deja
-    # SDL_main sin definir en todos los ejecutables.
-    target_link_libraries(${NECTAR_GAME} PRIVATE ${SDL2_LIBRARIES} opengl32 comdlg32 ws2_32)
+    target_link_libraries(${NECTAR_GAME} PRIVATE SDL3::SDL3 comdlg32 ws2_32)
 elseif (ANDROID)
-    # En Android no hay X11 ni OpenGL de escritorio. GLESv3 y EGL vienen del
-    # NDK; log y android los necesita la capa de plataforma (logcat, ciclo de
-    # vida de la actividad) cuando el ejecutable se convierta en biblioteca
-    # compartida en la fase 4.
-    target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} GLESv3 EGL log android)
-    # Android 15 exige bibliotecas alineadas a páginas de 16 KB en arm64.
+    target_link_libraries(${NECTAR_GAME} PRIVATE SDL3::SDL3 m GLESv3 EGL log android)
     target_link_options(${NECTAR_GAME} PRIVATE "-Wl,-z,max-page-size=16384")
 else()
-    if(PIKMIN_GLES)
-        target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GLES3 $<$<NOT:$<PLATFORM_ID:Darwin>>:X11>)
-    else()
-        target_link_libraries(${NECTAR_GAME} PRIVATE m ${SDL2_LIBRARIES} OpenGL::GL $<$<NOT:$<PLATFORM_ID:Darwin>>:X11>)
-    endif()
+    target_link_libraries(${NECTAR_GAME} PRIVATE SDL3::SDL3 m $<$<NOT:$<PLATFORM_ID:Darwin>>:X11>)
 endif()
 # Export symbol names so the diagnostic backtrace in pc_gfx.cpp prints function
 # names rather than bare addresses. Costs nothing at runtime.
@@ -1244,6 +1223,25 @@ if(PIKMIN_BUILD_LAUNCHER)
 endif()
 
 install(TARGETS ${NECTAR_GAME} RUNTIME DESTINATION bin)
+
+# Aurora is the only graphics backend. Always included.
+add_subdirectory(pc_port/aurora "${CMAKE_BINARY_DIR}/aurora_scope")
+# Aurora's include directory provides <dolphin/gx.h> and other GX headers.
+# The game's own include/Dolphin/GX is removed; game code compiles against
+# Aurora's headers directly.
+target_include_directories(${NECTAR_GAME} PRIVATE "${AURORA_DIR}/include")
+# Also add Aurora's include to the legacy library so decompiled code sees
+# Aurora's GX headers when it includes <dolphin/gx.h>.
+target_include_directories(${NECTAR_LEGACY} PRIVATE "${AURORA_DIR}/include")
+# Link the game directly to Aurora and SDL3 (no mixed-SDL workaround).
+target_link_libraries(${NECTAR_GAME} PRIVATE
+    SDL3::SDL3
+    aurora_core
+    aurora_gx
+    aurora_vi
+)
+# Legacy decompiled TUs that include the port's input headers need SDL3 headers.
+target_link_libraries(${NECTAR_LEGACY} PRIVATE SDL3::Headers)
 
 # Tests del launcher: necesitan tanto los tests habilitados como el launcher.
 if(PIKMIN_BUILD_TESTS AND PIKMIN_BUILD_LAUNCHER)
@@ -1543,7 +1541,8 @@ if(PIKMIN_BUILD_TESTS)
 
     # Pad axis conversion (no controller needed)
     add_executable(pc_pad_axis_test pc_port/pc_pad_axis_test.cpp pc_port/pc_pad_axis.cpp)
-    target_include_directories(pc_pad_axis_test PRIVATE ${SDL2_INCLUDE_DIRS} pc_port)
+    target_include_directories(pc_pad_axis_test PRIVATE pc_port)
+    target_link_libraries(pc_pad_axis_test PRIVATE SDL3::SDL3)
     target_compile_options(pc_pad_axis_test PRIVATE ${NATIVE_COMPILE_OPTIONS})
     add_test(NAME pc_pad_axis_test COMMAND pc_pad_axis_test)
 
@@ -2060,11 +2059,7 @@ message(STATUS "╠════════════════════�
 # no haber cogido -DPIKMIN_GAME_VERSION (issue #214).
 string(REPLACE "VERSION_" "" _nectar_version_label "${PIKMIN_GAME_VERSION}")
 message(STATUS "║   Version:  ${_nectar_version_label}")
-if(PIKMIN_GLES)
-    message(STATUS "║   Graphics: Native GX → OpenGL ES 3.0   ║")
-else()
-    message(STATUS "║   Graphics: Native GX → OpenGL          ║")
-endif()
+message(STATUS "║   Graphics: Native GX → Aurora (WebGPU) ║")
 message(STATUS "║   Audio:    SDL mixer/STX; JAudio WIP   ║")
 message(STATUS "║   Input:    Native SDL keyboard/gamepad ║")
 message(STATUS "╚══════════════════════════════════════════╝")

@@ -90,6 +90,29 @@ void pc_gfx_end(void);
 #define GX_WRITE_U32(val) pc_gfx_push_u32((u32)(val))
 #define GX_WRITE_F32(val) pc_gfx_push_f32((f32)(val))
 
+#if PIKI_USE_AURORA
+// The FIFO must receive the exact component widths selected by GXSetVtxAttrFmt.
+void GXPosition2f32(const f32 x, const f32 y);
+void GXPosition3s16(const s16 x, const s16 y, const s16 z);
+void GXPosition3u16(const u16 x, const u16 y, const u16 z);
+void GXPosition3f32(f32 x, f32 y, f32 z);
+void GXNormal3f32(const f32 x, const f32 y, const f32 z);
+void GXColor4u8(const u8 r, const u8 g, const u8 b, const u8 a);
+void GXTexCoord2s8(const s8 u, const s8 v);
+void GXTexCoord2u8(u8 s, u8 t);
+void GXPosition2u16(u16 x, u16 y);
+void GXPosition2s16(s16 x, s16 y);
+void GXTexCoord2s16(const s16 u, const s16 v);
+void GXTexCoord2u16(const u16 u, const u16 v);
+void GXTexCoord2f32(const f32 u, const f32 v);
+void GXEnd(void);
+
+static inline void GXColor1u32(u32 c)
+{
+	const u8* rgba = (const u8*)&c;
+	GXColor4u8(rgba[0], rgba[1], rgba[2], rgba[3]);
+}
+#else
 static inline void GXPosition2f32(const f32 x, const f32 y)
 {
 	pc_gfx_position(x, y, 0.0f);
@@ -179,6 +202,8 @@ static inline void GXEnd(void)
 {
 	pc_gfx_end();
 }
+
+#endif
 
 ////////////////////////////////////////////
 

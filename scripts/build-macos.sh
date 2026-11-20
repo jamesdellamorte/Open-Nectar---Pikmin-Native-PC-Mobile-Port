@@ -9,6 +9,8 @@
 # Requisitos: brew install cmake (y xcode-select --install).
 # Opcional: brew install libusb para un mando USB Xbox 360 (con reconexión).
 # Sin libusb se compila igualmente, con los mandos que SDL reconoce de serie.
+#
+# Usage: ./scripts/build-macos.sh
 set -euo pipefail
 
 root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,24 +21,15 @@ archs="$(uname -m)"
 usa_dir="${root}/build/pikmin1"
 pal_dir="${root}/build/pikmin1-pal"
 
-# SDL2 de verdad, estática (como en scripts/release-macos.sh). El sdl2-compat de
-# Homebrew corre sobre SDL3 y en algunos Mac no entrega ningún mando al juego.
-if [[ ! -f "${sdl_dir}/install/lib/libSDL2.a" ]]; then
-    mkdir -p "${sdl_dir}"
-    if [[ ! -d "${sdl_dir}/src" ]]; then
-        mkdir -p "${sdl_dir}/src"
-        curl -fsSL "https://github.com/libsdl-org/SDL/releases/download/release-${sdl_version}/SDL2-${sdl_version}.tar.gz" \
-            | tar -xz -C "${sdl_dir}/src" --strip-components=1
-    fi
-    cmake -S "${sdl_dir}/src" -B "${sdl_dir}/build" -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_OSX_ARCHITECTURES="${archs}" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF \
-        -DCMAKE_INSTALL_PREFIX="${sdl_dir}/install"
-    cmake --build "${sdl_dir}/build" -j"${jobs}"
-    cmake --install "${sdl_dir}/build"
+# Aurora es el único backend gráfico y corre sobre SDL3; el código del juego
+# sigue compilando contra la API de SDL2 vía sdl2-compat (brew install
+# sdl2-compat), que implementa el ABI de SDL2 sobre el mismo SDL3 de Aurora:
+# un solo runtime SDL en el proceso. Ya no hace falta la SDL2 estática.
+if ! brew list sdl2-compat >/dev/null 2>&1 && [[ ! -d /opt/homebrew/opt/sdl2-compat && ! -d /usr/local/opt/sdl2-compat ]]; then
+    echo "Falta sdl2-compat. Ejecuta: brew install sdl2-compat" >&2
+    exit 1
 fi
-# SDL2_DIR puede estar en caché tras seguir el README con Homebrew. Cambiar
-# solo CMAKE_PREFIX_PATH no lo sustituye: seleccionar el paquete explícitamente.
-sdl_args=(-DCMAKE_PREFIX_PATH="${sdl_dir}/install" -DSDL2_DIR="${sdl_dir}/install/lib/cmake/SDL2" -DPIKMIN_STATIC_RUNTIME=ON)
+sdl_args=()
 
 cmake -S "${root}/games/pikmin1" -B "${usa_dir}" -DCMAKE_BUILD_TYPE=Release -DPIKMIN_NATIVE_JAUDIO=ON -DPIKMIN_XINPUT_USB=ON "${sdl_args[@]}" \
     -DPIKMIN_GAME_VERSION=VERSION_GPIE01_01

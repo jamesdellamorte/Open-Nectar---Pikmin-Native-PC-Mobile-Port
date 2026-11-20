@@ -43,7 +43,7 @@
 #include "NaviState.h"
 #include "system.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -175,7 +175,7 @@ void set_visible(bool on, const char* why)
 
 void poll_toggle(const PcNetplayHudInfo& info)
 {
-	const Uint8* keys  = SDL_GetKeyboardState(nullptr);
+	const bool* keys  = SDL_GetKeyboardState(nullptr);
 	const bool keyDown = keys != nullptr && keys[SDL_SCANCODE_F4] != 0 && !f4_bound();
 	bool chord         = false;
 	const bool sticksInUse = info.inputKind != pc_netplay_input_sel::kInputKeyboard && stick_buttons_in_use();

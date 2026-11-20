@@ -1,7 +1,7 @@
 // Standalone visual fixture. Includes the menu implementation to set page
 // state without adding debug controls to the game or touching a save/config.
 // The wrapper omits the production pc_settings.cpp object when linking.
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <GL/gl.h>
 #include "settings/pc_settings.cpp"
 
@@ -9,7 +9,7 @@ int main(int argc, char** argv)
 {
     if (argc != 4) return 2;
     SDL_SetMainReady();
-    if (!pc_window_init("Port menu verification", std::atoi(argv[2]), std::atoi(argv[3]))) return 2;
+    if (!pc_window_init(argc, argv, "Port menu verification", std::atoi(argv[2]), std::atoi(argv[3]))) return 2;
     gsys->Initialise();
     pc_settings_p2d_init();
     sConfig.applyDefaults();

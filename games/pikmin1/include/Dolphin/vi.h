@@ -14,6 +14,9 @@ void __VIInit(VITVMode mode);
 void VIInit(void);
 void VIFlush(void);
 void VIWaitForRetrace(void);
+#ifdef PIKI_PC_PORT
+void pc_vi_present_frame(void* displayBuffer, bool clear);
+#endif
 
 // Configure functions.
 void VIConfigure(const GXRenderModeObj* obj);

@@ -21,7 +21,13 @@ extern void GXClearVtxDesc();
 extern void GXSetVtxAttrFmt(GXVtxFmt format, GXAttr attr, GXCompCnt count, GXCompType type, u8 frac);
 extern void GXSetVtxAttrFmtv(GXVtxFmt format, GXVtxAttrFmtList* list);
 
+#if PIKI_USE_AURORA
+void GXSetArray(GXAttr attr, const void* data, u32 size, u8 stride, bool littleEndian);
+#define GX_SET_HOST_ARRAY(attr, ptr, count, stride) GXSetArray(attr, ptr, (count) * (stride), stride, true)
+#else
 extern void GXSetArray(GXAttr attr, void* basePtr, u8 stride);
+#define GX_SET_HOST_ARRAY(attr, ptr, count, stride) GXSetArray(attr, ptr, stride)
+#endif
 extern void GXInvalidateVtxCache();
 extern void GXSetTexCoordGen2(GXTexCoordID coord, GXTexGenType genType, GXTexGenSrc srcParam, u32 mtx, GXBool doNormalise, u32 postMtx);
 extern void GXSetNumTexGens(u8 count);

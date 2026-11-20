@@ -5,7 +5,7 @@
 #include "install_note_layout.h"
 #include "launcher_platform.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
 #include <atomic>

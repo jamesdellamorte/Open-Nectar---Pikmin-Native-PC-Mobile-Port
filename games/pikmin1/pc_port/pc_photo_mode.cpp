@@ -1,6 +1,6 @@
 #include "pc_photo_mode.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cmath>
 
 namespace {
@@ -26,7 +26,7 @@ bool sTogglePrev = false;
 float sPosX = 0.0f, sPosY = 0.0f, sPosZ = 0.0f;
 float sPitch = 0.0f, sYaw = 0.0f, sRoll = 0.0f;
 
-bool keyDown(const Uint8* keys, int numKeys, SDL_Scancode sc)
+bool keyDown(const bool* keys, int numKeys, SDL_Scancode sc)
 {
 	return keys != nullptr && (int)sc < numKeys && keys[sc] != 0;
 }
@@ -51,7 +51,7 @@ void pc_photo_mode_request_toggle(void) { sToggleRequested = true; }
 int pc_photo_mode_poll_toggle(void)
 {
 	int numKeys        = 0;
-	const Uint8* keys  = SDL_GetKeyboardState(&numKeys);
+	const bool* keys  = SDL_GetKeyboardState(&numKeys);
 	const bool nowDown = keyDown(keys, numKeys, SDL_SCANCODE_F3);
 	const bool edge    = nowDown && !sTogglePrev;
 	sTogglePrev        = nowDown;
@@ -153,7 +153,7 @@ void pc_photo_mode_update(float dt,
 	if (dt > 0.1f) dt = 0.1f;
 
 	int numKeys       = 0;
-	const Uint8* keys = SDL_GetKeyboardState(&numKeys);
+	const bool* keys = SDL_GetKeyboardState(&numKeys);
 
 	// Look first: movement is relative to where the camera ends up facing.
 	float lookX = 0.0f, lookY = 0.0f;

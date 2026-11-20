@@ -568,18 +568,19 @@ void DGXGraphics::waitRetrace()
 		}
 	}
 	VIFlush();
+	const bool clear = !(gsys->mIsLoadScreenActive || gsys->mSoftResetPending);
 #if defined(PIKI_PC_PORT)
 	// On GameCube mFrameRate is the number of VI retraces per logical frame:
 	// 1 = 60 Hz, 2 = 30 Hz. Preserve that contract on PC so legacy systems
 	// which advance once per update do not speed up as rendering gets faster.
 	// Pass the clamp through untouched: 0 is the 120 Hz mode, not an error.
 	pc_window_set_swap_interval(mSystemFrameRate >= 0 ? mSystemFrameRate : 1);
-#endif
+	pc_vi_present_frame(mDisplayBuffer, clear);
+#else
 	VIWaitForRetrace();
 	GXSetZMode(GX_TRUE, GX_LEQUAL, GX_TRUE);
-
-	bool set = (gsys->mIsLoadScreenActive || gsys->mSoftResetPending) ? false : true;
-	GXCopyDisp(mDisplayBuffer, set);
+	GXCopyDisp(mDisplayBuffer, clear);
+#endif
 
 	mRetraceCount    = VIGetRetraceCount();
 	mSystemFrameRate = gsys->mFrameRate;
@@ -1254,14 +1255,14 @@ void DGXGraphics::initMesh(Shape* model)
 		if (model->mVertexCacheFlags & VertexCacheFlags::VertexList) {
 			DCStoreRange(model->mVertexList, model->mVertexCount * sizeof(Vector3f));
 		}
-		GXSetArray(GX_VA_POS, model->mVertexList, sizeof(Vector3f));
+		GX_SET_HOST_ARRAY(GX_VA_POS, model->mVertexList, model->mVertexCount, sizeof(Vector3f));
 	}
 
 	if (model->mNormalList) {
 		if (model->mVertexCacheFlags & VertexCacheFlags::NormalList) {
 			DCStoreRange(model->mNormalList, model->mNormalCount * sizeof(Vector3f));
 		}
-		GXSetArray(GX_VA_NRM, model->mNormalList, sizeof(Vector3f));
+		GX_SET_HOST_ARRAY(GX_VA_NRM, model->mNormalList, model->mNormalCount, sizeof(Vector3f));
 	}
 
 	if (model->mNBTList) {
@@ -1276,7 +1277,7 @@ void DGXGraphics::initMesh(Shape* model)
 			if (model->mVertexCacheFlags & (1 << (i + 5))) {
 				DCStoreRange(model->mTexCoordList[i], model->mTexCoordCounts[i] * sizeof(Vector2f));
 			}
-			GXSetArray((GXAttr)(GX_VA_TEX0 + i), model->mTexCoordList[i], sizeof(Vector2f));
+			GX_SET_HOST_ARRAY((GXAttr)(GX_VA_TEX0 + i), model->mTexCoordList[i], model->mTexCoordCounts[i], sizeof(Vector2f));
 		}
 	}
 
@@ -1285,7 +1286,7 @@ void DGXGraphics::initMesh(Shape* model)
 			DCStoreRange(model->mVtxColorList, model->mVertexCount * sizeof(Colour));
 		}
 
-		GXSetArray(GX_VA_CLR0, model->mVtxColorList, sizeof(Colour));
+		GX_SET_HOST_ARRAY(GX_VA_CLR0, model->mVtxColorList, model->mVtxColorCount, sizeof(Colour));
 	}
 
 	model->mVertexCacheFlags = VertexCacheFlags::None;
@@ -1344,13 +1345,13 @@ void DGXGraphics::setupVtxDesc(Shape* model, Material* mat, Mesh* mesh)
 	}
 
 	if (mCustomScale) {
-		GXSetArray(GX_VA_NBT, model->mNBTList, sizeof(NBT));
+		GX_SET_HOST_ARRAY(GX_VA_NBT, model->mNBTList, model->mNBTCount, sizeof(NBT));
 		GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NBT, GX_NRM_NBT, GX_F32, 0);
 		GXSetVtxDesc(GX_VA_NRM, GX_NONE);
 		GXSetVtxDesc(GX_VA_NBT, GX_INDEX16);
 		sendNbtIndx = true;
 	} else {
-		GXSetArray(GX_VA_NRM, model->mNormalList, sizeof(Vector3f));
+		GX_SET_HOST_ARRAY(GX_VA_NRM, model->mNormalList, model->mNormalCount, sizeof(Vector3f));
 		GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_NRM, GX_NRM_XYZ, GX_F32, 0);
 		GXSetVtxDesc(GX_VA_NRM, GX_INDEX16);
 		GXSetVtxDesc(GX_VA_NBT, GX_NONE);
@@ -1380,11 +1381,11 @@ void DGXGraphics::setupVtxDesc(Shape* model, Material* mat, Mesh* mesh)
 	// Mapas grandes del editor: cada malla indexa su propio tramo de los arrays.
 	if (mesh->mPcHasArrayBase && !mCustomScale) {
 		const int* base = mesh->mPcArrayBase;
-		if (model->mVertexList) GXSetArray(GX_VA_POS, model->mVertexList + base[0], sizeof(Vector3f));
-		if (model->mNormalList) GXSetArray(GX_VA_NRM, model->mNormalList + base[1], sizeof(Vector3f));
-		if (model->mVtxColorList) GXSetArray(GX_VA_CLR0, model->mVtxColorList + base[2], sizeof(Colour));
+		if (model->mVertexList) GX_SET_HOST_ARRAY(GX_VA_POS, model->mVertexList + base[0], model->mVertexCount - base[0], sizeof(Vector3f));
+		if (model->mNormalList) GX_SET_HOST_ARRAY(GX_VA_NRM, model->mNormalList + base[1], model->mNormalCount - base[1], sizeof(Vector3f));
+		if (model->mVtxColorList) GX_SET_HOST_ARRAY(GX_VA_CLR0, model->mVtxColorList + base[2], model->mVtxColorCount - base[2], sizeof(Colour));
 		for (int i = 0; i < model->mTotalActiveTexCoords && i < 8; i++) {
-			if (model->mTexCoordList[i]) GXSetArray(GXAttr(GX_VA_TEX0 + i), model->mTexCoordList[i] + base[3 + i], sizeof(Vector2f));
+			if (model->mTexCoordList[i]) GX_SET_HOST_ARRAY(GXAttr(GX_VA_TEX0 + i), model->mTexCoordList[i] + base[3 + i], model->mTexCoordCounts[i] - base[3 + i], sizeof(Vector2f));
 		}
 	}
 #endif

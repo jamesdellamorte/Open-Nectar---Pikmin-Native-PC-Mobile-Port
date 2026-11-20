@@ -74,25 +74,25 @@ int main()
     // swapped L/R press would report both triggers at once.
     int bindings[PC_KEY_ACT_COUNT];
     for (int& binding : bindings) binding = -1;
-    const int leftTrigger = PC_GP_AXIS_BIND + SDL_CONTROLLER_AXIS_TRIGGERLEFT * 2 + 1;
-    const int rightTrigger = PC_GP_AXIS_BIND + SDL_CONTROLLER_AXIS_TRIGGERRIGHT * 2 + 1;
+    const int leftTrigger = PC_GP_AXIS_BIND + SDL_GAMEPAD_AXIS_LEFT_TRIGGER * 2 + 1;
+    const int rightTrigger = PC_GP_AXIS_BIND + SDL_GAMEPAD_AXIS_RIGHT_TRIGGER * 2 + 1;
     expect(pc_gamepad_axis_is_mapped_elsewhere(bindings, PC_KEY_ACT_COUNT,
-                                               SDL_CONTROLLER_AXIS_TRIGGERLEFT, PC_KEY_ACT_L),
+                                               SDL_GAMEPAD_AXIS_LEFT_TRIGGER, PC_KEY_ACT_L),
            false, "unmapped left trigger keeps native fallback");
     bindings[PC_KEY_ACT_L] = rightTrigger;
     bindings[PC_KEY_ACT_R] = leftTrigger;
     expect(pc_gamepad_axis_is_mapped_elsewhere(bindings, PC_KEY_ACT_COUNT,
-                                               SDL_CONTROLLER_AXIS_TRIGGERLEFT, PC_KEY_ACT_L),
+                                               SDL_GAMEPAD_AXIS_LEFT_TRIGGER, PC_KEY_ACT_L),
            true, "swapped left trigger suppresses native L");
     expect(pc_gamepad_axis_is_mapped_elsewhere(bindings, PC_KEY_ACT_COUNT,
-                                               SDL_CONTROLLER_AXIS_TRIGGERRIGHT, PC_KEY_ACT_R),
+                                               SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, PC_KEY_ACT_R),
            true, "swapped right trigger suppresses native R");
 
     // Explicitly binding a trigger to its own native action is not a remap.
     bindings[PC_KEY_ACT_L] = leftTrigger;
     bindings[PC_KEY_ACT_R] = rightTrigger;
     expect(pc_gamepad_axis_is_mapped_elsewhere(bindings, PC_KEY_ACT_COUNT,
-                                               SDL_CONTROLLER_AXIS_TRIGGERLEFT, PC_KEY_ACT_L),
+                                               SDL_GAMEPAD_AXIS_LEFT_TRIGGER, PC_KEY_ACT_L),
            false, "native left binding keeps analog fallback");
 
 	if (sFailures == 0) {

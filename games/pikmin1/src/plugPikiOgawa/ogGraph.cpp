@@ -285,8 +285,8 @@ static void setGraphGX(void* vertexData, int pikminColor, u8 alpha)
 		GXSetVtxDesc(GX_VA_CLR0, GX_DIRECT);
 		GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_RGBA4, 0);
 		GXSetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_POS_XYZ, GX_RGBA8, 0);
-		GXSetArray(GX_VA_POS, vertexData, sizeof(u32));
-		GXSetArray(GX_VA_CLR0, og_piki_lines_color, sizeof(og_piki_lines_color[0]));
+		GX_SET_HOST_ARRAY(GX_VA_POS, vertexData, hours, sizeof(u32));
+		GX_SET_HOST_ARRAY(GX_VA_CLR0, og_piki_lines_color, PikiColorCount, sizeof(og_piki_lines_color[0]));
 		GXSetLineWidth(0x12, GX_TO_ZERO);
 		GXBegin(GX_LINESTRIP, GX_VTXFMT0, hours);
 

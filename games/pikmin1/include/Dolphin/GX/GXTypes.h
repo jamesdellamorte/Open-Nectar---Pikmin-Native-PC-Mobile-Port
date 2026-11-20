@@ -38,7 +38,11 @@ typedef struct _GXColorS10 {
 
 // Generic struct for texture objects.
 typedef struct _GXTexObj {
-	u8 pad[0x20]; // _00
+#if PIKI_USE_AURORA
+	u64 pad[8]; // Aurora stores native pointers and texture version information.
+#else
+	u8 pad[0x20];
+#endif
 } GXTexObj;       // size 0x20
 
 // Internal struct for texture objects.
@@ -71,7 +75,11 @@ typedef struct _GXTexRegionPriv {
 
 // Generic struct for texture look-up table objects.
 typedef struct _GXTlutObj {
-	u8 padding[0xc]; // _00
+#if PIKI_USE_AURORA
+	u64 padding[5]; // Aurora stores native pointers and texture version information.
+#else
+	u8 padding[0xc];
+#endif
 } GXTlutObj;
 
 typedef struct _GXTlutObjPriv {

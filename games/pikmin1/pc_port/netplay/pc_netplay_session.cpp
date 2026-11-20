@@ -112,7 +112,7 @@
 #include "Dolphin/pad.h"
 #include "jaudio/interface.h"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 #include <algorithm>
 #include <atomic>
@@ -4873,7 +4873,7 @@ bool online_turn(System* sys, BaseApp* app)
 		online_host_backfill();
 		if (!sOnline->guestEverJoined && !sOnline->code.empty()) {
 			// Waiting for the guest: Ctrl+C copies the code again.
-			const Uint8* keys = SDL_GetKeyboardState(nullptr);
+			const bool* keys = SDL_GetKeyboardState(nullptr);
 			const bool copy   = keys != nullptr && keys[SDL_SCANCODE_C] && (SDL_GetModState() & KMOD_CTRL);
 			if (copy && !sOnline->copyKeyDown) sOnline->codeCopied = SDL_SetClipboardText(sOnline->code.c_str()) == 0;
 			sOnline->copyKeyDown = copy;

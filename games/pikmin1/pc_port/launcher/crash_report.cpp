@@ -2,7 +2,7 @@
 
 #include "launcher_gui.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include <cctype>
 #include <deque>

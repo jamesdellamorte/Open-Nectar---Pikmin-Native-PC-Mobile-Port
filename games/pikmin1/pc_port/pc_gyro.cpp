@@ -13,7 +13,7 @@ constexpr float kDeadZone           = 0.015f; // rad/s tras restar el bias
 constexpr float kCursorPerRadian    = 400.0f; // unidades de delta del ratón por radián
 constexpr float kCameraDragPerRad   = 1.0f / 3.2f; // PcamCamera gira 3,2 rad por unidad
 
-SDL_GameController* sPad = nullptr;
+SDL_Gamepad* sPad = nullptr;
 bool sPadHasGyro         = false;
 SDL_Sensor* sDeviceGyro  = nullptr;
 Uint64 sLastCounter      = 0;
@@ -22,17 +22,17 @@ float sCalibLeft   = 0.0f;
 double sCalibSum[3] = { 0.0, 0.0, 0.0 };
 int sCalibSamples  = 0;
 
-void bindPad(SDL_GameController* pad)
+void bindPad(SDL_Gamepad* pad)
 {
 	if (pad == sPad) {
 		return;
 	}
 	sPad        = pad;
 	sPadHasGyro = false;
-	if (pad && SDL_GameControllerHasSensor(pad, SDL_SENSOR_GYRO)) {
-		sPadHasGyro = SDL_GameControllerSetSensorEnabled(pad, SDL_SENSOR_GYRO, SDL_TRUE) == 0;
+	if (pad && SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO)) {
+		sPadHasGyro = SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_GYRO, true);
 		if (sPadHasGyro) {
-			printf("[PC Port] Gyro: using controller sensor (%s)\n", SDL_GameControllerName(pad));
+			printf("[PC Port] Gyro: using controller sensor (%s)\n", SDL_GetGamepadName(pad));
 		}
 	}
 }
@@ -44,17 +44,17 @@ bool readRaw(float out[3])
 {
 	if (sPadHasGyro) {
 		// SDL ya da los mandos en ese marco: x cabeceo, y guiñada, z alabeo.
-		return SDL_GameControllerGetSensorData(sPad, SDL_SENSOR_GYRO, out, 3) == 0;
+		return SDL_GetGamepadSensorData(sPad, SDL_SENSOR_GYRO, out, 3);
 	}
 	if (sDeviceGyro) {
 		float d[3];
-		if (SDL_SensorGetData(sDeviceGyro, d, 3) != 0) {
+		if (!SDL_GetSensorData(sDeviceGyro, d, 3)) {
 			return false;
 		}
 		// El sensor del móvil va en ejes del dispositivo en vertical
 		// (x derecha, y arriba, z fuera de la pantalla). Se rotan según cómo
 		// esté girada la pantalla.
-		switch (SDL_GetDisplayOrientation(0)) {
+		switch (SDL_GetCurrentDisplayOrientation(0)) {
 		case SDL_ORIENTATION_LANDSCAPE: // borde derecho arriba
 			out[0] = -d[1];
 			out[1] = d[0];
@@ -105,20 +105,23 @@ extern "C" int pc_gyro_take_recenter_view(void)
 
 void pc_gyro_init(void)
 {
-	if (SDL_InitSubSystem(SDL_INIT_SENSOR) != 0) {
+	if (!SDL_InitSubSystem(SDL_INIT_SENSOR)) {
 		printf("[PC Port] Gyro: sensor subsystem unavailable: %s\n", SDL_GetError());
 		return;
 	}
 #if defined(__ANDROID__)
-	for (int i = 0; i < SDL_NumSensors(); i++) {
-		if (SDL_SensorGetDeviceType(i) == SDL_SENSOR_GYRO) {
-			sDeviceGyro = SDL_SensorOpen(i);
+	int count = 0;
+	SDL_SensorID* sensors = SDL_GetSensors(&count);
+	for (int i = 0; i < count; i++) {
+		if (SDL_GetSensorTypeForID(sensors[i]) == SDL_SENSOR_GYRO) {
+			sDeviceGyro = SDL_OpenSensor(sensors[i]);
 			if (sDeviceGyro) {
-				printf("[PC Port] Gyro: using device sensor (%s)\n", SDL_SensorGetDeviceName(i));
+				printf("[PC Port] Gyro: using device sensor (%s)\n", SDL_GetSensorName(sDeviceGyro));
 				break;
 			}
 		}
 	}
+	SDL_free(sensors);
 #endif
 }
 
@@ -142,7 +145,7 @@ float pc_gyro_calibration_seconds_left(void)
 	return sCalibLeft;
 }
 
-void pc_gyro_update(SDL_GameController* pad, bool menuOpen, bool firstPerson)
+void pc_gyro_update(SDL_Gamepad* pad, bool menuOpen, bool firstPerson)
 {
 	bindPad(pad);
 

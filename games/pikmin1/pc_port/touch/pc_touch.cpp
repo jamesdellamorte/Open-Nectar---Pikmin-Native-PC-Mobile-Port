@@ -10,7 +10,7 @@ static void pc_photo_mode_add_touch_look(float, float) { }
 #include "../pc_photo_mode.h"
 #endif
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>

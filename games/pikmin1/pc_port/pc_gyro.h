@@ -1,7 +1,7 @@
 #ifndef PC_GYRO_H
 #define PC_GYRO_H
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 /* Apuntado con giroscopio. Fuentes, por prioridad: el giroscopio del mando del
    jugador 1 si lo tiene (Pro Controller, Joy-Con, DualShock 4, DualSense...),
@@ -11,7 +11,7 @@
 /// Una vez, tras SDL_Init.
 void pc_gyro_init(void);
 /// Cada sondeo de entrada. `pad` puede ser nullptr.
-void pc_gyro_update(SDL_GameController* pad, bool menuOpen, bool firstPerson);
+void pc_gyro_update(SDL_Gamepad* pad, bool menuOpen, bool firstPerson);
 /// Hay alguna fuente de giroscopio disponible ahora mismo.
 bool pc_gyro_available(void);
 /// Mide la deriva en reposo durante unos segundos y la guarda como bias.

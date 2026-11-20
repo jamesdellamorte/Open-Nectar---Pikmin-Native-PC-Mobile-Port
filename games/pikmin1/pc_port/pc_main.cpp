@@ -5,8 +5,6 @@
  * Replaces the original sysBootup.cpp main() which called
  * gsys->Initialise() and gsys->run(new PlugPikiApp()).
  *
- * This file will grow in later stages to include SDL2 window creation,
- * OpenGL context setup, and input polling.
  */
 #include <cstdio>
 #include "netplay/pc_online_switch.h"
@@ -28,7 +26,7 @@ int pc_jaudio_integration_test();
  * the main loop. Since all Dolphin SDK calls are stubbed, this will
  * "run" but produce no visible output yet.
  */
-#include <SDL.h>
+#include <SDL3/SDL_main.h>
 
 #ifdef _WIN32
 // Laptops with switchable graphics start a process on the integrated GPU unless
@@ -49,7 +47,6 @@ __declspec(dllexport) int           AmdPowerXpressRequestHighPerformance = 1;
 #include "pc_crash.h"
 #include "pc_window.h"
 #include "pc_discord.h"
-#include "pc_gpu_preference.h"
 #include "gl/pc_gfx.h"
 #include "gl/pc_texpack.h"
 #ifdef __ANDROID__
@@ -116,11 +113,6 @@ int main(int argc, char* argv[])
     // PIKMIN_NETPLAY_* variables), before the game starts. Inert unless set.
     pc_netplay_det_init(argc, argv);
 
-    // Before SDL_Init, and before anything can touch GL: on Linux the vendor
-    // is selected by libglvnd the first time it is asked, and by the time a
-    // context exists the choice has already been made. No-op elsewhere.
-    pc_gpu_preference_apply();
-
 #if PIKI_USE_JAUDIO
     if (argc == 2 && std::strcmp(argv[1], "--audio-self-test") == 0)
         return pc_jaudio_integration_test();
@@ -175,24 +167,10 @@ int main(int argc, char* argv[])
 #if PC_ONLINE_ENABLED
     pc_netplay_session_notify_argv(argc, argv);
 #endif
-    (void)argc;
-    (void)argv;
-
-    printf("╔══════════════════════════════════════════╗\n");
-    printf("║   Pikmin - Native Linux PC Port          ║\n");
-#if PIKI_USE_GLES
-    printf("║   OpenGL ES 3.0 Rendering Backend        ║\n");
-#else
-    printf("║   OpenGL Rendering Backend               ║\n");
-#endif
-    printf("╚══════════════════════════════════════════╝\n\n");
+    printf("[Open Nectar] Initializing the Aurora game window...\n");
     fflush(stdout);
-
-    // Initialize SDL2 Window and OpenGL Context FIRST
-    printf("[PC Port] Initializing SDL2 window and GL context...\n");
-    fflush(stdout);
-    if (!pc_window_init("Open Nectar", 1280, 720)) {
-        printf("[PC Port Fatal Error] Could not initialize window/OpenGL!\n");
+    if (!pc_window_init(argc, argv, "Open Nectar", 1280, 720)) {
+        printf("[PC Port Fatal Error] Could not initialize Aurora!\n");
         fflush(stdout);
         return 1;
     }
@@ -219,11 +197,8 @@ int main(int argc, char* argv[])
     nodeMgr = new NodeMgr();
 
     printf("[PC Port] Starting game application...\n");
-#if PIKI_USE_GLES
-    printf("[PC Port] Native GX/OpenGL ES, SDL input and persistent save backends active.\n");
-#else
-    printf("[PC Port] Native GX/OpenGL, SDL input and persistent save backends active.\n");
-#endif
+    printf("[PC Port] Aurora GX, SDL input and persistent saves active.\n");
+
     printf("[PC Port] Audio and movie playback are still under development.\n\n");
 
     gsys->run(new PlugPikiApp());
